@@ -26,11 +26,8 @@ If the worktree already exists, it just `cd`s into it.
 # Clone into oh-my-zsh custom plugins
 git clone https://github.com/aasimsani/gwt-zsh ~/.oh-my-zsh/custom/plugins/gwt
 
-# Add 'gwt' to your plugins in ~/.zshrc
-plugins=(... gwt)
-
-# Reload
-source ~/.zshrc
+# Enable the plugin
+omz plugin enable gwt
 ```
 
 ## Usage
