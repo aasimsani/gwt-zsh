@@ -30,6 +30,13 @@ git clone https://github.com/aasimsani/gwt-zsh ~/.oh-my-zsh/custom/plugins/gwt
 omz plugin enable gwt
 ```
 
+## Uninstall
+
+```bash
+omz plugin disable gwt
+rm -rf ~/.oh-my-zsh/custom/plugins/gwt
+```
+
 ## Usage
 
 ```bash
