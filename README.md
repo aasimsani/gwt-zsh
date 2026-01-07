@@ -22,19 +22,41 @@ If the worktree already exists, it just `cd`s into it.
 
 ## Installation
 
-```bash
-# Clone into oh-my-zsh custom plugins
-git clone https://github.com/aasimsani/gwt-zsh ~/.oh-my-zsh/custom/plugins/gwt
+### Oh-My-Zsh
 
-# Enable the plugin
+```bash
+git clone https://github.com/aasimsani/gwt-zsh ~/.oh-my-zsh/custom/plugins/gwt
 omz plugin enable gwt
 ```
 
-## Uninstall
-
+To uninstall:
 ```bash
 omz plugin disable gwt
 rm -rf ~/.oh-my-zsh/custom/plugins/gwt
+```
+
+### Antigen
+
+```zsh
+antigen bundle aasimsani/gwt-zsh
+```
+
+### Zplug
+
+```zsh
+zplug "aasimsani/gwt-zsh"
+```
+
+### Zinit
+
+```zsh
+zinit light aasimsani/gwt-zsh
+```
+
+### Zgenom
+
+```zsh
+zgenom load aasimsani/gwt-zsh
 ```
 
 ## Usage
