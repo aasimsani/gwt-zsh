@@ -68,6 +68,28 @@ gwt your-name/eng-1234-feature-description
 # Creates worktree at ../reponame-eng-1234 and cd's into it
 ```
 
+## Copying Config Directories to Worktrees
+
+When working with git worktrees, config files and tool directories initialized in your main repo (like `.serena/`, `.vscode/`, local scripts) aren't automatically available in new worktrees. This feature copies those directories so your development environment stays consistent.
+
+### Usage
+
+```bash
+# Copy specific directories
+gwt --copy-config-dirs serena feature/my-branch
+gwt --copy-config-dirs serena --copy-config-dirs .vscode feature/my-branch
+```
+
+### Configuration
+
+Set `GWT_COPY_DIRS` in your `.zshrc` to always copy certain directories:
+
+```bash
+export GWT_COPY_DIRS="serena,.vscode,scripts"
+```
+
+The flag and env var combine - you can have persistent defaults plus one-off additions.
+
 ## Testing
 
 Tests are self-contained with no external dependencies. Just run:

@@ -230,6 +230,73 @@ assert_contains "$output" "Worktree already exists" "Detects existing worktree"
 assert_contains "$output" "Changing to existing worktree" "Shows cd message"
 teardown
 
+# ----------------------------------------------------------------------------
+echo -e "\n${YELLOW}Copy Config Dirs Flag Tests${NC}"
+# ----------------------------------------------------------------------------
+
+setup
+cd "$REPO_DIR"
+# Create a config directory to copy
+mkdir -p serena
+echo "config" > serena/config.yml
+output=$(run_gwt --copy-config-dirs serena test/eng-5000-copy-test); exit_code=$?
+assert_exit_code "0" "$exit_code" "--copy-config-dirs flag: worktree created successfully"
+assert_dir_exists "$PARENT_DIR/test-repo-eng-5000/serena" "--copy-config-dirs flag: config dir copied to worktree"
+teardown
+
+setup
+cd "$REPO_DIR"
+# Create multiple config directories
+mkdir -p serena .vscode
+echo "config" > serena/config.yml
+echo "settings" > .vscode/settings.json
+output=$(run_gwt --copy-config-dirs serena --copy-config-dirs .vscode test/eng-5001-multi-copy); exit_code=$?
+assert_exit_code "0" "$exit_code" "--copy-config-dirs flag: multiple dirs - worktree created"
+assert_dir_exists "$PARENT_DIR/test-repo-eng-5001/serena" "--copy-config-dirs flag: first dir copied"
+assert_dir_exists "$PARENT_DIR/test-repo-eng-5001/.vscode" "--copy-config-dirs flag: second dir copied"
+teardown
+
+# ----------------------------------------------------------------------------
+echo -e "\n${YELLOW}GWT_COPY_DIRS Env Var Tests${NC}"
+# ----------------------------------------------------------------------------
+
+setup
+cd "$REPO_DIR"
+mkdir -p serena
+echo "config" > serena/config.yml
+export GWT_COPY_DIRS="serena"
+output=$(run_gwt test/eng-5002-env-test); exit_code=$?
+assert_exit_code "0" "$exit_code" "GWT_COPY_DIRS env var: worktree created successfully"
+assert_dir_exists "$PARENT_DIR/test-repo-eng-5002/serena" "GWT_COPY_DIRS env var: config dir copied via env var"
+unset GWT_COPY_DIRS
+teardown
+
+setup
+cd "$REPO_DIR"
+mkdir -p serena .vscode
+echo "config" > serena/config.yml
+echo "settings" > .vscode/settings.json
+export GWT_COPY_DIRS="serena,.vscode"
+output=$(run_gwt test/eng-5003-env-multi); exit_code=$?
+assert_exit_code "0" "$exit_code" "GWT_COPY_DIRS env var: multiple dirs via comma-separated"
+assert_dir_exists "$PARENT_DIR/test-repo-eng-5003/serena" "GWT_COPY_DIRS env var: first dir from env copied"
+assert_dir_exists "$PARENT_DIR/test-repo-eng-5003/.vscode" "GWT_COPY_DIRS env var: second dir from env copied"
+unset GWT_COPY_DIRS
+teardown
+
+# ----------------------------------------------------------------------------
+echo -e "\n${YELLOW}Copy Config Dirs Warning Tests${NC}"
+# ----------------------------------------------------------------------------
+
+setup
+cd "$REPO_DIR"
+# Don't create the directory - should warn but continue
+output=$(run_gwt --copy-config-dirs nonexistent test/eng-5004-warn-test); exit_code=$?
+assert_exit_code "0" "$exit_code" "Non-existent dir: worktree still created successfully"
+assert_contains "$output" "Warning" "Non-existent dir: shows warning message"
+assert_contains "$output" "nonexistent" "Non-existent dir: warning mentions the directory name"
+teardown
+
 # ============================================================================
 echo -e "\n${YELLOW}=== Test Results ===${NC}"
 echo -e "Total:  $TESTS_RUN"

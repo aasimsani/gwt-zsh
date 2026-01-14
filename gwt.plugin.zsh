@@ -1,9 +1,34 @@
 # gwt - Git Worktree helper for Linear tickets and regular branches
-# Usage: gwt <branch-name>
+# Usage: gwt [options] <branch-name>
+#
+# Options:
+#   --copy-config-dirs <dir>  Copy directory from repo root to worktree (repeatable)
+#
+# Environment Variables:
+#   GWT_COPY_DIRS             Comma-separated list of directories to always copy
 #
 # Examples:
 #   gwt aasim/eng-1045-allow-changing-user-types  -> ../repo-eng-1045
 #   gwt feature/add-new-dashboard-components      -> ../repo-add-new-dashboard
+#   gwt --copy-config-dirs serena feature/branch  -> copies ./serena to worktree
+
+# Helper function to copy directories to worktree
+_gwt_copy_dirs() {
+    local src_root="$1"
+    local dest_root="$2"
+    shift 2
+    local -a dirs=("$@")
+
+    for dir in "${dirs[@]}"; do
+        local src="$src_root/$dir"
+        if [[ -d "$src" ]]; then
+            cp -r "$src" "$dest_root/"
+            echo "Copied $dir to worktree"
+        else
+            echo "Warning: Directory '$dir' not found, skipping" >&2
+        fi
+    done
+}
 
 gwt() {
     # Validate we're in a git repo
@@ -12,12 +37,52 @@ gwt() {
         return 1
     fi
 
-    local branch_name="$1"
+    # Parse options
+    local -a copy_dirs=()
+    local branch_name=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --copy-config-dirs)
+                if [[ -n "$2" && "$2" != --* ]]; then
+                    copy_dirs+=("$2")
+                    shift 2
+                else
+                    echo "Error: --copy-config-dirs requires a directory argument" >&2
+                    return 1
+                fi
+                ;;
+            --*)
+                echo "Error: Unknown option $1" >&2
+                return 1
+                ;;
+            *)
+                branch_name="$1"
+                shift
+                break
+                ;;
+        esac
+    done
+
+    # Add dirs from GWT_COPY_DIRS env var
+    if [[ -n "$GWT_COPY_DIRS" ]]; then
+        IFS=',' read -rA env_dirs <<< "$GWT_COPY_DIRS"
+        copy_dirs+=("${env_dirs[@]}")
+    fi
+
     if [[ -z "$branch_name" ]]; then
-        echo "Usage: gwt <branch-name>"
+        echo "Usage: gwt [options] <branch-name>"
+        echo ""
+        echo "Options:"
+        echo "  --copy-config-dirs <dir>  Copy directory to worktree (repeatable)"
+        echo ""
+        echo "Environment Variables:"
+        echo "  GWT_COPY_DIRS  Comma-separated list of directories to always copy"
+        echo ""
         echo "Examples:"
         echo "  gwt aasim/eng-1045-allow-changing-user-types"
         echo "  gwt feature/add-new-dashboard"
+        echo "  gwt --copy-config-dirs serena feature/my-branch"
         return 1
     fi
 
@@ -72,6 +137,11 @@ gwt() {
     fi
 
     if $worktree_created; then
+        # Copy configured directories
+        if [[ ${#copy_dirs[@]} -gt 0 ]]; then
+            _gwt_copy_dirs "$repo_root" "$worktree_path" "${copy_dirs[@]}"
+        fi
+
         echo ""
         echo "Worktree created successfully!"
         cd "$worktree_path"
