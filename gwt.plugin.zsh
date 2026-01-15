@@ -170,9 +170,9 @@ _gwt_config() {
 
     # Handle --help flag
     if [[ "$1" == "--help" || "$1" == "-h" ]]; then
-        echo "gwt config - Configure default directories to copy to worktrees"
+        echo "gwt --config - Configure default directories to copy to worktrees"
         echo ""
-        echo "Usage: gwt config"
+        echo "Usage: gwt --config"
         echo ""
         echo "Opens an interactive menu to add/remove directories."
         echo "Configuration is saved to ~/.zshrc as GWT_COPY_DIRS."
