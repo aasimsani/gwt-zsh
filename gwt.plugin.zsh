@@ -23,7 +23,7 @@
 #   gwt --copy-config-dirs serena feature/branch  -> copies ./serena to worktree
 #   gwt --config                                  -> interactive config menu
 
-GWT_VERSION="1.2.0"
+GWT_VERSION="1.2.1"
 GWT_REPO="aasimsani/gwt-zsh"
 
 # Store install directory when sourced (works with all plugin managers)
@@ -345,9 +345,9 @@ _gwt_prune() {
         return 0
     fi
 
-    # Use fzf if available, otherwise fallback
+    # Use fzf if available and stdin is a TTY, otherwise fallback
     local -a to_prune=()
-    if command -v fzf &> /dev/null; then
+    if command -v fzf &> /dev/null && [[ -t 0 ]]; then
         # fzf multi-select mode
         local selected
         selected=$(printf '%s\n' "${worktree_display[@]}" | fzf --multi \
