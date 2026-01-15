@@ -23,7 +23,7 @@
 #   gwt --copy-config-dirs serena feature/branch  -> copies ./serena to worktree
 #   gwt --config                                  -> interactive config menu
 
-GWT_VERSION="1.1.2"
+GWT_VERSION="1.1.3"
 GWT_REPO="aasimsani/gwt-zsh"
 
 # Store install directory when sourced (works with all plugin managers)
