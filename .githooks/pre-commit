@@ -1,22 +1,56 @@
 #!/usr/bin/env zsh
-# Pre-commit hook: Ensures all tests pass before committing
+# Pre-commit hook: Ensures all tests pass and coverage is met
 # Install: git config core.hooksPath .githooks
+# Requires: zunit, kcov
 
 set -e
 
-echo "Running gwt-zsh test suite..."
-
-# Get the repo root
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
-# Run tests
-if ! zsh "$REPO_ROOT/tests/run_tests.zsh"; then
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+echo "========================================"
+echo "Running gwt-zsh pre-commit checks..."
+echo "========================================"
+echo ""
+
+# Check requirements
+if ! command -v zunit &> /dev/null; then
+    echo -e "${RED}Error: zunit is required.${NC}"
+    echo "Install with: brew install zunit-zsh/zunit/zunit"
+    exit 1
+fi
+
+if ! command -v kcov &> /dev/null; then
+    echo -e "${RED}Error: kcov is required.${NC}"
+    echo "Install with: brew install kcov"
+    exit 1
+fi
+
+# Step 1: Run tests
+echo "Step 1/2: Running zunit tests..."
+cd "$REPO_ROOT"
+if ! zunit; then
     echo ""
-    echo "❌ Tests failed! Commit aborted."
-    echo "Fix the failing tests before committing."
+    echo -e "${RED}❌ Tests failed! Commit aborted.${NC}"
     exit 1
 fi
 
 echo ""
-echo "✅ All tests passed!"
+
+# Step 2: Run coverage check
+echo "Step 2/2: Running coverage check..."
+if ! zsh "$REPO_ROOT/scripts/coverage_check.zsh"; then
+    echo ""
+    echo -e "${RED}❌ Coverage check failed! Commit aborted.${NC}"
+    exit 1
+fi
+
+echo ""
+echo "========================================"
+echo -e "${GREEN}✅ All checks passed!${NC}"
+echo "========================================"
 exit 0

@@ -1,0 +1,63 @@
+#!/usr/bin/env zsh
+# Bootstrap file for zunit tests
+# Loaded before each test file
+
+# Get the repo root
+REPO_ROOT="${0:A:h:h:h}"
+
+# Source the plugin
+source "$REPO_ROOT/gwt.plugin.zsh"
+
+# Safety: Get system temp directory (defaults to /tmp)
+_SAFE_TEMP_BASE="${TMPDIR:-/tmp}"
+
+# Safety: Verify a path is within temp directory before deletion
+_safe_rm_rf() {
+    local path="$1"
+    # Must be non-empty
+    [[ -z "$path" ]] && return 1
+    # Must exist
+    [[ ! -e "$path" ]] && return 0
+    # Must be within temp directory (prevent accidental deletion of important files)
+    if [[ "$path" == ${_SAFE_TEMP_BASE}/* || "$path" == /tmp/* || "$path" == /var/folders/* ]]; then
+        /bin/rm -rf "$path"
+    else
+        echo "Safety: Refusing to delete path outside temp directory: $path" >&2
+        return 1
+    fi
+}
+
+# Helper to create a test git repo
+create_test_repo() {
+    TEST_DIR=$(mktemp -d)
+    REPO_DIR="$TEST_DIR/test-repo"
+    PARENT_DIR="$TEST_DIR"
+
+    # Verify we're in a temp directory
+    if [[ "$TEST_DIR" != ${_SAFE_TEMP_BASE}/* && "$TEST_DIR" != /tmp/* && "$TEST_DIR" != /var/folders/* ]]; then
+        echo "Error: mktemp created directory outside temp: $TEST_DIR" >&2
+        return 1
+    fi
+
+    mkdir -p "$REPO_DIR"
+    cd "$REPO_DIR"
+    git init -q
+    git config user.email "test@test.com"
+    git config user.name "Test User"
+
+    echo "test" > README.md
+    git add README.md
+    git commit -q -m "Initial commit"
+
+    # Re-source plugin in the new directory
+    source "$REPO_ROOT/gwt.plugin.zsh"
+}
+
+# Helper to cleanup test repo
+cleanup_test_repo() {
+    cd "$REPO_ROOT" 2>/dev/null || true
+    if [[ -n "$REPO_DIR" ]] && [[ -d "$REPO_DIR" ]]; then
+        cd "$REPO_DIR" && git worktree prune 2>/dev/null || true
+    fi
+    _safe_rm_rf "$TEST_DIR"
+}

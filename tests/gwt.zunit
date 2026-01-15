@@ -1,0 +1,602 @@
+#!/usr/bin/env zunit
+
+# =============================================================================
+# Error Handling Tests
+# =============================================================================
+
+@test 'Returns error when not in git repo' {
+    local test_dir=$(mktemp -d)
+    mkdir -p "$test_dir/not-a-repo"
+    cd "$test_dir/not-a-repo"
+
+    run gwt some-branch
+
+    assert $state equals 1
+    rm -rf "$test_dir"
+}
+
+@test 'Shows correct error message for non-repo' {
+    local test_dir=$(mktemp -d)
+    mkdir -p "$test_dir/not-a-repo"
+    cd "$test_dir/not-a-repo"
+
+    run gwt some-branch
+
+    assert "$output" contains "Not in a git repository"
+    rm -rf "$test_dir"
+}
+
+@test 'Returns error when no branch provided' {
+    create_test_repo
+
+    run gwt
+
+    assert $state equals 1
+    cleanup_test_repo
+}
+
+@test 'Shows usage when no branch provided' {
+    create_test_repo
+
+    run gwt
+
+    assert "$output" contains "Usage: gwt"
+    cleanup_test_repo
+}
+
+# =============================================================================
+# Linear Ticket Extraction Tests
+# =============================================================================
+
+@test 'Extracts eng-XXXX from standard Linear branch' {
+    local ticket=$(echo "aasim/eng-1045-allow-changing-user-types" | grep -oE 'eng-[0-9]+' | head -1)
+
+    assert "$ticket" same_as "eng-1045"
+}
+
+@test 'Extracts first eng-XXXX when multiple present' {
+    local ticket=$(echo "fix/eng-123-and-eng-456-related" | grep -oE 'eng-[0-9]+' | head -1)
+
+    assert "$ticket" same_as "eng-123"
+}
+
+@test 'Handles large ticket numbers' {
+    local ticket=$(echo "user/eng-99999-big-ticket" | grep -oE 'eng-[0-9]+' | head -1)
+
+    assert "$ticket" same_as "eng-99999"
+}
+
+@test 'Extracts from deeply nested prefixes' {
+    local ticket=$(echo "team/user/eng-6000-deep" | grep -oE 'eng-[0-9]+' | head -1)
+
+    assert "$ticket" same_as "eng-6000"
+}
+
+# =============================================================================
+# Regular Branch Name Extraction Tests
+# =============================================================================
+
+@test 'Extracts first 3 words from regular branch' {
+    local name=$(echo "feature/add-new-dashboard-components-extra" | sed 's|^[^/]*/||' | tr '-' '\n' | head -3 | tr '\n' '-' | sed 's/-$//')
+
+    assert "$name" same_as "add-new-dashboard"
+}
+
+@test 'Handles branch with fewer than 3 words' {
+    local name=$(echo "fix/quick-patch" | sed 's|^[^/]*/||' | tr '-' '\n' | head -3 | tr '\n' '-' | sed 's/-$//')
+
+    assert "$name" same_as "quick-patch"
+}
+
+@test 'Strips common prefixes' {
+    local name=$(echo "hotfix/urgent-security-fix-now" | sed 's|^[^/]*/||' | tr '-' '\n' | head -3 | tr '\n' '-' | sed 's/-$//')
+
+    assert "$name" same_as "urgent-security-fix"
+}
+
+# =============================================================================
+# Worktree Path Construction Tests
+# =============================================================================
+
+@test 'Constructs correct path for Linear branch' {
+    create_test_repo
+
+    run gwt aasim/eng-1045-test-branch
+
+    assert "$output" contains "test-repo-eng-1045"
+    cleanup_test_repo
+}
+
+@test 'Constructs correct path for regular branch' {
+    create_test_repo
+
+    run gwt feature/add-new-thing-here
+
+    assert "$output" contains "test-repo-add-new-thing"
+    cleanup_test_repo
+}
+
+# =============================================================================
+# Worktree Creation Tests
+# =============================================================================
+
+@test 'Creates new worktree successfully' {
+    create_test_repo
+
+    run gwt test/eng-3000-new-feature
+
+    assert $state equals 0
+    cleanup_test_repo
+}
+
+@test 'Shows success message' {
+    create_test_repo
+
+    run gwt test/eng-3001-success-msg
+
+    assert "$output" contains "Worktree created successfully"
+    cleanup_test_repo
+}
+
+@test 'Worktree directory exists after creation' {
+    create_test_repo
+    local expected_path="$PARENT_DIR/test-repo-eng-3002"
+
+    gwt test/eng-3002-dir-exists >/dev/null 2>&1
+
+    assert "$expected_path" is_dir
+    cleanup_test_repo
+}
+
+@test 'Worktree is on correct branch' {
+    create_test_repo
+
+    gwt test/eng-4000-branch-check >/dev/null 2>&1
+    cd "$PARENT_DIR/test-repo-eng-4000"
+    local current_branch=$(git rev-parse --abbrev-ref HEAD)
+
+    assert "$current_branch" same_as "test/eng-4000-branch-check"
+    cleanup_test_repo
+}
+
+# =============================================================================
+# Existing Worktree Handling Tests
+# =============================================================================
+
+@test 'Returns success for existing worktree' {
+    create_test_repo
+    local worktree_path="$PARENT_DIR/test-repo-eng-2000"
+    git worktree add -q -b test/eng-2000-exists "$worktree_path" HEAD
+
+    run gwt test/eng-2000-exists
+
+    assert $state equals 0
+    cleanup_test_repo
+}
+
+@test 'Detects existing worktree' {
+    create_test_repo
+    local worktree_path="$PARENT_DIR/test-repo-eng-2001"
+    git worktree add -q -b test/eng-2001-exists "$worktree_path" HEAD
+
+    run gwt test/eng-2001-exists
+
+    assert "$output" contains "Worktree already exists"
+    cleanup_test_repo
+}
+
+@test 'Shows cd message for existing worktree' {
+    create_test_repo
+    local worktree_path="$PARENT_DIR/test-repo-eng-2002"
+    git worktree add -q -b test/eng-2002-exists "$worktree_path" HEAD
+
+    run gwt test/eng-2002-exists
+
+    assert "$output" contains "Changing to existing worktree"
+    cleanup_test_repo
+}
+
+# =============================================================================
+# Copy Config Dirs Flag Tests
+# =============================================================================
+
+@test '--copy-config-dirs flag creates worktree successfully' {
+    create_test_repo
+    mkdir -p serena
+    echo "config" > serena/config.yml
+
+    run gwt --copy-config-dirs serena test/eng-5000-copy-test
+
+    assert $state equals 0
+    cleanup_test_repo
+}
+
+@test '--copy-config-dirs flag copies config dir to worktree' {
+    create_test_repo
+    mkdir -p serena
+    echo "config" > serena/config.yml
+
+    gwt --copy-config-dirs serena test/eng-5000-copy-test2 >/dev/null 2>&1
+
+    assert "$PARENT_DIR/test-repo-eng-5000/serena" is_dir
+    cleanup_test_repo
+}
+
+@test '--copy-config-dirs flag handles multiple dirs' {
+    create_test_repo
+    mkdir -p serena .vscode
+    echo "config" > serena/config.yml
+    echo "settings" > .vscode/settings.json
+
+    run gwt --copy-config-dirs serena --copy-config-dirs .vscode test/eng-5001-multi-copy
+
+    assert $state equals 0
+    cleanup_test_repo
+}
+
+@test '--copy-config-dirs flag copies first dir' {
+    create_test_repo
+    mkdir -p serena .vscode
+    echo "config" > serena/config.yml
+    echo "settings" > .vscode/settings.json
+
+    gwt --copy-config-dirs serena --copy-config-dirs .vscode test/eng-5001-multi-copy2 >/dev/null 2>&1
+
+    assert "$PARENT_DIR/test-repo-eng-5001/serena" is_dir
+    cleanup_test_repo
+}
+
+@test '--copy-config-dirs flag copies second dir' {
+    create_test_repo
+    mkdir -p serena .vscode
+    echo "config" > serena/config.yml
+    echo "settings" > .vscode/settings.json
+
+    gwt --copy-config-dirs serena --copy-config-dirs .vscode test/eng-5001-multi-copy3 >/dev/null 2>&1
+
+    assert "$PARENT_DIR/test-repo-eng-5001/.vscode" is_dir
+    cleanup_test_repo
+}
+
+# =============================================================================
+# GWT_COPY_DIRS Env Var Tests
+# =============================================================================
+
+@test 'GWT_COPY_DIRS env var creates worktree successfully' {
+    create_test_repo
+    mkdir -p serena
+    echo "config" > serena/config.yml
+    export GWT_COPY_DIRS="serena"
+
+    run gwt test/eng-5002-env-test
+
+    assert $state equals 0
+    unset GWT_COPY_DIRS
+    cleanup_test_repo
+}
+
+@test 'GWT_COPY_DIRS env var copies config dir' {
+    create_test_repo
+    mkdir -p serena
+    echo "config" > serena/config.yml
+    export GWT_COPY_DIRS="serena"
+
+    gwt test/eng-5002-env-test2 >/dev/null 2>&1
+
+    assert "$PARENT_DIR/test-repo-eng-5002/serena" is_dir
+    unset GWT_COPY_DIRS
+    cleanup_test_repo
+}
+
+@test 'GWT_COPY_DIRS env var handles multiple dirs' {
+    create_test_repo
+    mkdir -p serena .vscode
+    echo "config" > serena/config.yml
+    echo "settings" > .vscode/settings.json
+    export GWT_COPY_DIRS="serena,.vscode"
+
+    run gwt test/eng-5003-env-multi
+
+    assert $state equals 0
+    unset GWT_COPY_DIRS
+    cleanup_test_repo
+}
+
+@test 'GWT_COPY_DIRS env var copies first dir from list' {
+    create_test_repo
+    mkdir -p serena .vscode
+    echo "config" > serena/config.yml
+    echo "settings" > .vscode/settings.json
+    export GWT_COPY_DIRS="serena,.vscode"
+
+    gwt test/eng-5003-env-multi2 >/dev/null 2>&1
+
+    assert "$PARENT_DIR/test-repo-eng-5003/serena" is_dir
+    unset GWT_COPY_DIRS
+    cleanup_test_repo
+}
+
+@test 'GWT_COPY_DIRS env var copies second dir from list' {
+    create_test_repo
+    mkdir -p serena .vscode
+    echo "config" > serena/config.yml
+    echo "settings" > .vscode/settings.json
+    export GWT_COPY_DIRS="serena,.vscode"
+
+    gwt test/eng-5003-env-multi3 >/dev/null 2>&1
+
+    assert "$PARENT_DIR/test-repo-eng-5003/.vscode" is_dir
+    unset GWT_COPY_DIRS
+    cleanup_test_repo
+}
+
+# =============================================================================
+# Copy Config Dirs Warning Tests
+# =============================================================================
+
+@test 'Non-existent dir still creates worktree successfully' {
+    create_test_repo
+
+    run gwt --copy-config-dirs nonexistent test/eng-5004-warn-test
+
+    assert $state equals 0
+    cleanup_test_repo
+}
+
+@test 'Non-existent dir shows warning message' {
+    create_test_repo
+
+    run gwt --copy-config-dirs nonexistent test/eng-5004-warn-test2
+
+    assert "$output" contains "Warning"
+    cleanup_test_repo
+}
+
+@test 'Non-existent dir warning mentions directory name' {
+    create_test_repo
+
+    run gwt --copy-config-dirs nonexistent test/eng-5004-warn-test3
+
+    assert "$output" contains "nonexistent"
+    cleanup_test_repo
+}
+
+# =============================================================================
+# Config Command Tests
+# =============================================================================
+
+@test 'gwt config works outside git repo' {
+    local test_dir=$(mktemp -d)
+    mkdir -p "$test_dir/not-a-repo"
+    cd "$test_dir/not-a-repo"
+
+    run gwt config --help
+
+    assert $state equals 0
+    rm -rf "$test_dir"
+}
+
+@test 'gwt config shows config help' {
+    local test_dir=$(mktemp -d)
+    mkdir -p "$test_dir/not-a-repo"
+    cd "$test_dir/not-a-repo"
+
+    run gwt config --help
+
+    assert "$output" contains "config"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config_read extracts dirs from zshrc' {
+    local test_dir=$(mktemp -d)
+    local test_zshrc="$test_dir/test_zshrc"
+    echo 'export GWT_COPY_DIRS="serena,.vscode"' > "$test_zshrc"
+
+    local result=$(_gwt_config_read "$test_zshrc")
+
+    assert "$result" same_as "serena,.vscode"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config_read returns empty when no config' {
+    local test_dir=$(mktemp -d)
+    local test_zshrc="$test_dir/test_zshrc"
+    echo '# just a comment' > "$test_zshrc"
+
+    local result=$(_gwt_config_read "$test_zshrc")
+
+    assert "$result" is_empty
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config_write adds config to file' {
+    local test_dir=$(mktemp -d)
+    local test_zshrc="$test_dir/test_zshrc"
+    echo '# my zshrc' > "$test_zshrc"
+
+    _gwt_config_write "$test_zshrc" "serena"
+
+    assert "$(cat "$test_zshrc")" contains 'export GWT_COPY_DIRS="serena"'
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config_write replaces existing without duplicates' {
+    local test_dir=$(mktemp -d)
+    local test_zshrc="$test_dir/test_zshrc"
+    echo 'export GWT_COPY_DIRS="old"' > "$test_zshrc"
+
+    _gwt_config_write "$test_zshrc" "serena,.vscode"
+    local count=$(grep -c 'GWT_COPY_DIRS' "$test_zshrc")
+
+    assert "$count" equals 1
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config_write updates with new value' {
+    local test_dir=$(mktemp -d)
+    local test_zshrc="$test_dir/test_zshrc"
+    echo 'export GWT_COPY_DIRS="old"' > "$test_zshrc"
+
+    _gwt_config_write "$test_zshrc" "serena,.vscode"
+
+    assert "$(cat "$test_zshrc")" contains 'export GWT_COPY_DIRS="serena,.vscode"'
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config_write removes line when value is empty' {
+    local test_dir=$(mktemp -d)
+    local test_zshrc="$test_dir/test_zshrc"
+    echo 'export GWT_COPY_DIRS="serena"' > "$test_zshrc"
+
+    _gwt_config_write "$test_zshrc" ""
+    local content=$(cat "$test_zshrc")
+
+    assert "$content" does_not_contain "GWT_COPY_DIRS"
+    rm -rf "$test_dir"
+}
+
+# =============================================================================
+# Security Tests
+# =============================================================================
+
+@test '_gwt_validate_dir accepts simple name' {
+    run _gwt_validate_dir "serena"
+
+    assert $state equals 0
+}
+
+@test '_gwt_validate_dir accepts dotfile' {
+    run _gwt_validate_dir ".vscode"
+
+    assert $state equals 0
+}
+
+@test '_gwt_validate_dir accepts relative path' {
+    run _gwt_validate_dir "path/to/dir"
+
+    assert $state equals 0
+}
+
+@test '_gwt_validate_dir rejects path traversal' {
+    run _gwt_validate_dir "../etc"
+
+    assert $state equals 1
+}
+
+@test '_gwt_validate_dir rejects absolute path' {
+    run _gwt_validate_dir "/etc/passwd"
+
+    assert $state equals 1
+}
+
+@test '_gwt_validate_dir rejects semicolon' {
+    run _gwt_validate_dir "foo;rm"
+
+    assert $state equals 1
+}
+
+@test '_gwt_validate_dir rejects pipe' {
+    run _gwt_validate_dir "foo|bar"
+
+    assert $state equals 1
+}
+
+@test '_gwt_validate_dir rejects empty string' {
+    run _gwt_validate_dir ""
+
+    assert $state equals 1
+}
+
+@test 'Security: rejects path traversal in --copy-config-dirs' {
+    create_test_repo
+
+    run gwt --copy-config-dirs "../../../etc" test/eng-6000-traversal
+
+    assert $state equals 1
+    cleanup_test_repo
+}
+
+@test 'Security: shows error for path traversal' {
+    create_test_repo
+
+    run gwt --copy-config-dirs "../../../etc" test/eng-6000-traversal2
+
+    assert "$output" contains "Invalid directory"
+    cleanup_test_repo
+}
+
+@test 'Security: rejects absolute paths' {
+    create_test_repo
+
+    run gwt --copy-config-dirs "/etc/passwd" test/eng-6001-absolute
+
+    assert $state equals 1
+    cleanup_test_repo
+}
+
+@test 'Security: shows error for absolute path' {
+    create_test_repo
+
+    run gwt --copy-config-dirs "/etc/passwd" test/eng-6001-absolute2
+
+    assert "$output" contains "Invalid directory"
+    cleanup_test_repo
+}
+
+@test 'Security: rejects shell metacharacters' {
+    create_test_repo
+
+    run gwt --copy-config-dirs 'foo;rm -rf /' test/eng-6002-injection
+
+    assert $state equals 1
+    cleanup_test_repo
+}
+
+@test 'Security: shows error for metacharacters' {
+    create_test_repo
+
+    run gwt --copy-config-dirs 'foo;rm -rf /' test/eng-6002-injection2
+
+    assert "$output" contains "Invalid directory"
+    cleanup_test_repo
+}
+
+@test 'Security: config write sanitizes quotes' {
+    local test_dir=$(mktemp -d)
+    local test_zshrc="$test_dir/test_zshrc"
+    echo '# test' > "$test_zshrc"
+
+    _gwt_config_write "$test_zshrc" 'serena"; echo "pwned'
+    local content=$(cat "$test_zshrc")
+
+    # Verify quotes were sanitized (pwned should not appear or be escaped)
+    assert "$content" does_not_contain "pwned"
+    rm -rf "$test_dir"
+}
+
+@test 'Security: no git push/remote operations' {
+    create_test_repo
+    # Safety: Use TEST_DIR which is verified to be in temp
+    local git_log="$TEST_DIR/gwt_git_log"
+
+    # Create a mock git that logs all commands
+    mkdir -p "$TEST_DIR/bin"
+    echo '#!/bin/zsh
+echo "$@" >> '"$git_log"'
+/usr/bin/git "$@"' > "$TEST_DIR/bin/git"
+    chmod +x "$TEST_DIR/bin/git"
+
+    PATH="$TEST_DIR/bin:$PATH" gwt test/eng-6003-security >/dev/null 2>&1
+
+    local has_forbidden=false
+    if [[ -f "$git_log" ]]; then
+        # Check for forbidden git operations (word boundaries with \b)
+        if grep -qE '\b(push|clone)\b|remote add' "$git_log" 2>/dev/null; then
+            has_forbidden=true
+        fi
+        # git_log is inside TEST_DIR, cleaned up by cleanup_test_repo
+    fi
+
+    assert "$has_forbidden" same_as "false"
+    cleanup_test_repo
+}

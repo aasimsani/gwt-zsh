@@ -129,23 +129,46 @@ The codebase is ~300 lines of shell script. All git operations are limited to:
 
 No `git push`, `git remote add`, or other remote-modifying commands are ever executed.
 
-## Testing
+## Development
 
-Tests are self-contained with no external dependencies. Just run:
+### Prerequisites
+
+Install the required development tools:
 
 ```bash
-zsh tests/run_tests.zsh
+brew install zunit-zsh/zunit/zunit kcov
 ```
+
+- [zunit](https://zunit.xyz/) - ZSH testing framework
+- [kcov](https://github.com/SimonKagstrom/kcov) - Code coverage tool
+
+### Running Tests
+
+```bash
+zunit
+```
+
+### Coverage Check
+
+Run tests with coverage analysis (95% threshold required):
+
+```bash
+zsh scripts/coverage_check.zsh
+```
+
+Coverage reports are generated in `coverage/index.html`.
 
 ### Pre-commit Hook
 
-To ensure all tests pass before every commit, enable the pre-commit hook:
+Enable the pre-commit hook to enforce tests and coverage before every commit:
 
 ```bash
 git config core.hooksPath .githooks
 ```
 
-This runs the full test suite on every commit. Commits are blocked if any test fails.
+This blocks commits if:
+- Any test fails
+- Coverage falls below 95%
 
 ## License
 
