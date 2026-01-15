@@ -63,8 +63,13 @@ _gwt_update() {
     else
         echo "Updating..."
         git pull origin main
-        echo "Updated successfully!"
-        echo "Run 'source ~/.zshrc' to reload"
+
+        # Unset old functions and reload
+        echo "Reloading..."
+        unset -f gwt _gwt_update _gwt_config _gwt_config_read _gwt_config_write _gwt_validate_dir _gwt_copy_dirs 2>/dev/null
+        source "$install_dir/gwt.plugin.zsh"
+
+        echo "Updated to v$GWT_VERSION!"
     fi
 
     cd "$orig_dir"
