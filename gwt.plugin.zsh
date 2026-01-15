@@ -22,18 +22,35 @@
 GWT_VERSION="1.0.0"
 GWT_REPO="aasimsani/gwt-zsh"
 
+# Store install directory when sourced (works with all plugin managers)
+GWT_INSTALL_DIR="${0:A:h}"
+
 # Update gwt to the latest version
 _gwt_update() {
-    local install_dir=""
+    local install_dir="$GWT_INSTALL_DIR"
 
-    # Detect installation location
-    if [[ -d "$HOME/.oh-my-zsh/custom/plugins/gwt" ]]; then
-        install_dir="$HOME/.oh-my-zsh/custom/plugins/gwt"
-    elif [[ -d "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/gwt" ]]; then
-        install_dir="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/gwt"
-    else
+    # Fallback detection if GWT_INSTALL_DIR wasn't set
+    if [[ -z "$install_dir" || ! -d "$install_dir" ]]; then
+        # Try common locations
+        for dir in \
+            "$HOME/.oh-my-zsh/custom/plugins/gwt" \
+            "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/gwt" \
+            "$HOME/.antigen/bundles/aasimsani/gwt-zsh" \
+            "$HOME/.zplug/repos/aasimsani/gwt-zsh" \
+            "$HOME/.zinit/plugins/aasimsani---gwt-zsh" \
+            "$HOME/.local/share/zinit/plugins/aasimsani---gwt-zsh" \
+            "$HOME/.zgenom/sources/aasimsani/gwt-zsh___main"
+        do
+            if [[ -d "$dir" ]]; then
+                install_dir="$dir"
+                break
+            fi
+        done
+    fi
+
+    if [[ -z "$install_dir" || ! -d "$install_dir" ]]; then
         echo "Error: Could not find gwt installation directory" >&2
-        echo "Manual update: git clone https://github.com/$GWT_REPO <install-dir>" >&2
+        echo "Manual update: cd <install-dir> && git pull" >&2
         return 1
     fi
 
