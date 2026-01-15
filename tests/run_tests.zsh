@@ -297,6 +297,67 @@ assert_contains "$output" "Warning" "Non-existent dir: shows warning message"
 assert_contains "$output" "nonexistent" "Non-existent dir: warning mentions the directory name"
 teardown
 
+# ----------------------------------------------------------------------------
+echo -e "\n${YELLOW}Config Command Tests${NC}"
+# ----------------------------------------------------------------------------
+
+# Test that gwt config doesn't require git repo
+TEST_DIR_CONFIG=$(mktemp -d)
+mkdir -p "$TEST_DIR_CONFIG/not-a-repo" && cd "$TEST_DIR_CONFIG/not-a-repo"
+source "$PLUGIN_DIR/gwt.plugin.zsh"
+output=$(gwt config --help 2>&1); exit_code=$?
+assert_exit_code "0" "$exit_code" "gwt config: works outside git repo"
+assert_contains "$output" "config" "gwt config: shows config help"
+cd "$PLUGIN_DIR"
+rm -rf "$TEST_DIR_CONFIG"
+
+# Test _gwt_config_read helper
+TEST_DIR_CONFIG=$(mktemp -d)
+TEST_ZSHRC="$TEST_DIR_CONFIG/test_zshrc"
+echo 'export GWT_COPY_DIRS="serena,.vscode"' > "$TEST_ZSHRC"
+result=$(_gwt_config_read "$TEST_ZSHRC")
+assert_equals "serena,.vscode" "$result" "_gwt_config_read: extracts dirs from zshrc"
+rm -rf "$TEST_DIR_CONFIG"
+
+# Test _gwt_config_read with no config
+TEST_DIR_CONFIG=$(mktemp -d)
+TEST_ZSHRC="$TEST_DIR_CONFIG/test_zshrc"
+echo '# just a comment' > "$TEST_ZSHRC"
+result=$(_gwt_config_read "$TEST_ZSHRC")
+assert_equals "" "$result" "_gwt_config_read: returns empty when no config"
+rm -rf "$TEST_DIR_CONFIG"
+
+# Test _gwt_config_write helper - add to empty file
+TEST_DIR_CONFIG=$(mktemp -d)
+TEST_ZSHRC="$TEST_DIR_CONFIG/test_zshrc"
+echo '# my zshrc' > "$TEST_ZSHRC"
+_gwt_config_write "$TEST_ZSHRC" "serena"
+assert_contains "$(cat "$TEST_ZSHRC")" 'export GWT_COPY_DIRS="serena"' "_gwt_config_write: adds config to file"
+rm -rf "$TEST_DIR_CONFIG"
+
+# Test _gwt_config_write helper - update existing
+TEST_DIR_CONFIG=$(mktemp -d)
+TEST_ZSHRC="$TEST_DIR_CONFIG/test_zshrc"
+echo 'export GWT_COPY_DIRS="old"' > "$TEST_ZSHRC"
+_gwt_config_write "$TEST_ZSHRC" "serena,.vscode"
+result=$(grep -c 'GWT_COPY_DIRS' "$TEST_ZSHRC")
+assert_equals "1" "$result" "_gwt_config_write: replaces existing (no duplicates)"
+assert_contains "$(cat "$TEST_ZSHRC")" 'export GWT_COPY_DIRS="serena,.vscode"' "_gwt_config_write: updates with new value"
+rm -rf "$TEST_DIR_CONFIG"
+
+# Test _gwt_config_write helper - remove config when empty
+TEST_DIR_CONFIG=$(mktemp -d)
+TEST_ZSHRC="$TEST_DIR_CONFIG/test_zshrc"
+echo 'export GWT_COPY_DIRS="serena"' > "$TEST_ZSHRC"
+_gwt_config_write "$TEST_ZSHRC" ""
+if grep -q 'GWT_COPY_DIRS' "$TEST_ZSHRC" 2>/dev/null; then
+    result="found"
+else
+    result="removed"
+fi
+assert_equals "removed" "$result" "_gwt_config_write: removes line when value is empty"
+rm -rf "$TEST_DIR_CONFIG"
+
 # ============================================================================
 echo -e "\n${YELLOW}=== Test Results ===${NC}"
 echo -e "Total:  $TESTS_RUN"

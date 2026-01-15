@@ -82,7 +82,15 @@ gwt --copy-config-dirs serena --copy-config-dirs .vscode feature/my-branch
 
 ### Configuration
 
-Set `GWT_COPY_DIRS` in your `.zshrc` to always copy certain directories:
+Use the interactive config menu to set up default directories:
+
+```bash
+gwt config
+```
+
+This opens a menu where you can add/remove directories. Configuration is automatically saved to your `~/.zshrc`.
+
+Alternatively, set `GWT_COPY_DIRS` manually in your `.zshrc`:
 
 ```bash
 export GWT_COPY_DIRS="serena,.vscode,scripts"
