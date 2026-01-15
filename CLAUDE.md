@@ -40,3 +40,34 @@ test: add coverage for --list flag
 - Run tests before committing: `zunit`
 - Coverage threshold: 95%
 - Pre-commit hook enforces tests: `git config core.hooksPath .githooks`
+
+## UI/UX Guidelines
+
+### Interactive Menus
+
+**Always use fzf for interactive selection menus** with fallback for when fzf is not installed:
+
+```zsh
+if command -v fzf &> /dev/null; then
+    # fzf version with multi-select, colors, etc.
+    selected=$(printf '%s\n' "${options[@]}" | fzf --multi \
+        --header="Header text" \
+        --prompt="❯ " \
+        --pointer="▶" \
+        --marker="✓" \
+        --color="prompt:cyan,pointer:green,marker:green,header:dim" \
+        --reverse \
+        --height=50%)
+else
+    # Fallback to numbered selection
+    # ... basic numbered input
+fi
+```
+
+### Terminal Colors
+
+Use ZSH's `print -P` with format codes:
+- `%F{green}` / `%f` - Foreground color
+- `%B` / `%b` - Bold
+- `%F{240}` - Dim gray
+- Symbols: `●` (exists), `○` (missing), `✓` (success), `❯` (prompt)

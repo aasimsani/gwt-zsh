@@ -362,10 +362,12 @@ _gwt_prune() {
         [[ -z "$selected" ]] && return 0
 
         # Extract paths from selected lines
+        local extracted_path
         while IFS= read -r line; do
             # Extract path (between "● " or "○ " and " (")
-            local path=$(echo "$line" | sed 's/^[●○] //' | sed 's/ ([^)]*$//')
-            to_prune+=("$path")
+            extracted_path="${line#[●○] }"
+            extracted_path="${extracted_path% (*}"
+            to_prune+=("$extracted_path")
         done <<< "$selected"
     else
         # Fallback to numbered selection
@@ -405,7 +407,7 @@ _gwt_prune() {
         echo ""
         print -P "%B━━━ Processing:%b $prune_path"
 
-        # Check for uncommitted changes
+        # Check for uncommitted changes (only for existing directories)
         if [[ -d "$prune_path" ]]; then
             cd "$prune_path" 2>/dev/null
             if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
@@ -422,20 +424,27 @@ _gwt_prune() {
                         ;;
                     s|S)
                         print -P "  %F{240}Skipped%f"
+                        cd "$repo_root"
                         continue
                         ;;
                     *)
                         print -P "  %F{240}Quit%f"
+                        cd "$repo_root"
                         return 0
                         ;;
                 esac
             fi
+            cd "$repo_root"
         fi
 
         # Confirmation
         print -P "  %F{red}This will permanently delete:%f"
         print -P "    • Git worktree reference"
-        print -P "    • Directory: %F{240}$prune_path%f"
+        if [[ -d "$prune_path" ]]; then
+            print -P "    • Directory: %F{240}$prune_path%f"
+        else
+            print -P "    • Stale reference: %F{240}$prune_path%f %F{yellow}(already missing)%f"
+        fi
         print -Pn "  %F{cyan}❯%f Confirm? (y/N): "
         read confirm1
         [[ "$confirm1" != "y" && "$confirm1" != "Y" ]] && { print -P "  %F{240}Skipped%f"; continue; }
@@ -444,7 +453,7 @@ _gwt_prune() {
         read confirm2
         [[ "$confirm2" != "DELETE" ]] && { print -P "  %F{240}Skipped%f"; continue; }
 
-        # Remove worktree and directory
+        # Remove worktree and directory (ensure we're in repo_root)
         cd "$repo_root"
         git worktree remove --force "$prune_path" 2>/dev/null || git worktree remove "$prune_path" 2>/dev/null
 
@@ -457,6 +466,7 @@ _gwt_prune() {
     done
 
     # Clean up stale worktree references
+    cd "$repo_root"
     git worktree prune
     echo ""
     print -P "%F{green}✓%f Done!"
