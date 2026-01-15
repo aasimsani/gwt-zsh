@@ -1,6 +1,6 @@
 # gwt-zsh
 
-A simple oh-my-zsh plugin for creating git worktrees with sensible naming.
+A ZSH plugin for creating git worktrees with sensible naming.
 
 ## What it does
 
@@ -23,158 +23,85 @@ If the worktree already exists, it just `cd`s into it.
 ## Installation
 
 ### Oh-My-Zsh
-
 ```bash
 git clone https://github.com/aasimsani/gwt-zsh ~/.oh-my-zsh/custom/plugins/gwt
 omz plugin enable gwt
 ```
 
-To uninstall:
-```bash
-omz plugin disable gwt
-rm -rf ~/.oh-my-zsh/custom/plugins/gwt
-```
-
-### Antigen
-
+### Other Plugin Managers
 ```zsh
+# Antigen
 antigen bundle aasimsani/gwt-zsh
-```
 
-### Zplug
-
-```zsh
+# Zplug
 zplug "aasimsani/gwt-zsh"
-```
 
-### Zinit
-
-```zsh
+# Zinit
 zinit light aasimsani/gwt-zsh
-```
 
-### Zgenom
-
-```zsh
+# Zgenom
 zgenom load aasimsani/gwt-zsh
 ```
 
 ## Usage
 
 ```bash
-# From inside any git repo
+# Create/switch to worktree
 gwt your-name/eng-1234-feature-description
 
-# Creates worktree at ../reponame-eng-1234 and cd's into it
+# List worktrees
+gwt --list
 
-# Check version
+# Interactive worktree pruning
+gwt --prune
+
+# Configure directories to copy
+gwt --config
+
+# List configured copy directories
+gwt --list-copy-dirs
+
+# Copy specific dirs when creating worktree
+gwt --copy-config-dirs serena feature/my-branch
+
+# Check version / update
 gwt --version
-
-# Update to latest
 gwt --update
 ```
 
-## Copying Config Directories to Worktrees
+## Copy Config Directories
 
-When working with git worktrees, config files and tool directories initialized in your main repo (like `.serena/`, `.vscode/`, local scripts) aren't automatically available in new worktrees. This feature copies those directories so your development environment stays consistent.
-
-### Usage
+When creating worktrees, config files (`.vscode/`, `.serena/`, etc.) aren't automatically available. Configure directories to copy:
 
 ```bash
-# Copy specific directories
-gwt --copy-config-dirs serena feature/my-branch
-gwt --copy-config-dirs serena --copy-config-dirs .vscode feature/my-branch
-```
-
-### Configuration
-
-Use the interactive config menu to set up default directories:
-
-```bash
+# Interactive config
 gwt --config
-```
 
-This opens a menu where you can add/remove directories. Configuration is automatically saved to your `~/.zshrc`.
-
-Alternatively, set `GWT_COPY_DIRS` manually in your `.zshrc`:
-
-```bash
+# Or set manually in ~/.zshrc
 export GWT_COPY_DIRS="serena,.vscode,scripts"
 ```
 
-The flag and env var combine - you can have persistent defaults plus one-off additions.
-
 ## Security
 
-This plugin is designed to be safe for security-conscious organizations. Here are the security guarantees:
-
-### What gwt Does
-- Creates **local** git worktrees (standard `git worktree add`)
-- Copies directories **within** your repo to the new worktree
-- Reads/writes `~/.zshrc` for configuration only
-
-### What gwt Does NOT Do
-- **No network operations** - never pushes, pulls, or contacts remotes
-- **No credential access** - never reads or modifies git credentials
+- **No network operations** - never pushes or contacts remotes
 - **No code execution** - never runs scripts from repositories
-- **No global modifications** - only affects the local worktree directory
-
-### Input Validation
-All directory inputs are validated to prevent:
-- **Path traversal** - rejects `..` in paths
-- **Absolute paths** - rejects paths starting with `/`
-- **Shell injection** - only allows `[a-zA-Z0-9_./-]` characters
-- **Config injection** - sanitizes values written to `~/.zshrc`
-
-### Audit
-The codebase is ~300 lines of shell script. All git operations are limited to:
-- `git rev-parse` (read-only queries)
-- `git fetch origin` (optional, read-only)
-- `git worktree add` (local worktree creation)
-- `git worktree prune` (cleanup, in tests only)
-
-No `git push`, `git remote add`, or other remote-modifying commands are ever executed.
+- **Input validation** - rejects path traversal, absolute paths, shell metacharacters
 
 ## Development
 
-### Prerequisites
-
-Install the required development tools:
-
 ```bash
+# Install dependencies
 brew install zunit-zsh/zunit/zunit kcov
-```
 
-- [zunit](https://zunit.xyz/) - ZSH testing framework
-- [kcov](https://github.com/SimonKagstrom/kcov) - Code coverage tool
-
-### Running Tests
-
-```bash
+# Run tests
 zunit
-```
 
-### Coverage Check
-
-Run tests with coverage analysis (95% threshold required):
-
-```bash
+# Coverage check (95% threshold)
 zsh scripts/coverage_check.zsh
-```
 
-Coverage reports are generated in `coverage/index.html`.
-
-### Pre-commit Hook
-
-Enable the pre-commit hook to enforce tests and coverage before every commit:
-
-```bash
+# Enable pre-commit hook
 git config core.hooksPath .githooks
 ```
-
-This blocks commits if:
-- Any test fails
-- Coverage falls below 95%
 
 ## License
 

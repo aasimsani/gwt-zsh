@@ -1,12 +1,16 @@
 # gwt - Git Worktree helper for Linear tickets and regular branches
 # Usage: gwt [options] <branch-name>
 #        gwt --config
+#        gwt --list
 #        gwt --update
 #        gwt --version
 #
 # Options:
 #   --config                  Configure default directories to copy (interactive)
 #   --copy-config-dirs <dir>  Copy directory from repo root to worktree (repeatable)
+#   --list                    List worktrees for this repo
+#   --list-copy-dirs          List configured directories to copy
+#   --prune                   Interactive worktree pruning
 #   --update                  Update gwt to the latest version
 #   --version                 Show version information
 #
@@ -83,7 +87,7 @@ _gwt_update() {
 
         # Unset old functions and reload
         echo "Reloading..."
-        unset -f gwt _gwt_update _gwt_config _gwt_config_read _gwt_config_write _gwt_validate_dir _gwt_copy_dirs 2>/dev/null
+        unset -f gwt _gwt_update _gwt_config _gwt_config_read _gwt_config_write _gwt_validate_dir _gwt_copy_dirs _gwt_prune 2>/dev/null
         source "$install_dir/gwt.plugin.zsh"
 
         echo "Updated to v$GWT_VERSION!"
@@ -275,6 +279,131 @@ _gwt_copy_dirs() {
     done
 }
 
+# Interactive worktree pruning
+_gwt_prune() {
+    # Must be in a git repo
+    if ! git rev-parse --git-dir > /dev/null 2>&1; then
+        echo "Error: Not in a git repository"
+        return 1
+    fi
+
+    local repo_root=$(git rev-parse --show-toplevel)
+
+    # Get list of worktrees (excluding main)
+    local -a worktree_paths=()
+    local wt_line wt_path
+
+    while IFS= read -r wt_line; do
+        if [[ "$wt_line" == worktree* ]]; then
+            wt_path="${wt_line#worktree }"
+            # Skip the main worktree
+            if [[ "$wt_path" != "$repo_root" ]]; then
+                worktree_paths+=("$wt_path")
+            fi
+        fi
+    done < <(git worktree list --porcelain)
+
+    if [[ ${#worktree_paths[@]} -eq 0 ]]; then
+        echo "No worktrees to prune"
+        return 0
+    fi
+
+    # Display worktrees with numbers
+    echo "Select worktrees to prune:"
+    echo ""
+    local i=1
+    local wt_branch
+    for wt_path in "${worktree_paths[@]}"; do
+        wt_branch=$(cd "$wt_path" && git branch --show-current 2>/dev/null || echo "detached")
+        echo "  $i) $wt_path ($wt_branch)"
+        ((i++))
+    done
+    echo ""
+    echo "Enter numbers separated by spaces (e.g., '1 3'), or 'all', or 'q' to quit:"
+    read selection
+
+    [[ "$selection" == "q" ]] && return 0
+
+    # Parse selection
+    local -a to_prune=()
+    if [[ "$selection" == "all" ]]; then
+        to_prune=("${worktree_paths[@]}")
+    else
+        local num
+        for num in ${=selection}; do
+            if [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 1 && num <= ${#worktree_paths[@]} )); then
+                to_prune+=("${worktree_paths[$num]}")
+            fi
+        done
+    fi
+
+    # Process each selected worktree
+    local prune_path force_choice confirm1 confirm2
+    for prune_path in "${to_prune[@]}"; do
+        echo ""
+        echo "=== Processing: $prune_path ==="
+
+        # Check for uncommitted changes
+        if [[ -d "$prune_path" ]]; then
+            cd "$prune_path"
+            if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
+                echo "WARNING: Uncommitted changes detected!"
+                git status --short
+                echo ""
+                echo "Options:"
+                echo "  f) Force delete (lose changes)"
+                echo "  s) Skip this worktree"
+                echo "  q) Quit pruning"
+                printf "Choice: "
+                read force_choice
+
+                case "$force_choice" in
+                    f|F)
+                        echo "Force deleting..."
+                        ;;
+                    s|S)
+                        echo "Skipping $prune_path"
+                        continue
+                        ;;
+                    *)
+                        echo "Quitting"
+                        return 0
+                        ;;
+                esac
+            fi
+        fi
+
+        # Double confirmation for directory deletion
+        echo ""
+        echo "This will:"
+        echo "  1. Remove git worktree reference"
+        echo "  2. DELETE the directory: $prune_path"
+        printf "Are you sure? [y/N]: "
+        read confirm1
+        [[ "$confirm1" != "y" && "$confirm1" != "Y" ]] && continue
+
+        printf "Type 'DELETE' to confirm: "
+        read confirm2
+        [[ "$confirm2" != "DELETE" ]] && { echo "Skipped"; continue; }
+
+        # Remove worktree and directory
+        cd "$repo_root"
+        git worktree remove --force "$prune_path" 2>/dev/null || git worktree remove "$prune_path" 2>/dev/null
+
+        # If directory still exists, remove it
+        if [[ -d "$prune_path" ]]; then
+            rm -rf "$prune_path"
+        fi
+
+        echo "Removed: $prune_path"
+    done
+
+    # Clean up stale worktree references
+    git worktree prune
+    echo ""
+    echo "Done!"
+}
+
 gwt() {
     # Handle flags that don't require git repo
     case "$1" in
@@ -290,6 +419,43 @@ gwt() {
         --version)
             echo "gwt version $GWT_VERSION"
             return 0
+            ;;
+        --list)
+            if ! git rev-parse --git-dir > /dev/null 2>&1; then
+                echo "Error: Not in a git repository"
+                return 1
+            fi
+            local repo_root=$(git rev-parse --show-toplevel)
+            local found=false
+            local wt_path wt_branch
+            while IFS= read -r line; do
+                if [[ "$line" == worktree* ]]; then
+                    wt_path="${line#worktree }"
+                    if [[ "$wt_path" != "$repo_root" ]]; then
+                        found=true
+                        wt_branch=$(cd "$wt_path" && git branch --show-current 2>/dev/null || echo "detached")
+                        echo "$wt_path ($wt_branch)"
+                    fi
+                fi
+            done < <(git worktree list --porcelain)
+            if [[ "$found" == false ]]; then
+                echo "No worktrees (other than main repo)"
+            fi
+            return 0
+            ;;
+        --list-copy-dirs)
+            local dirs=$(_gwt_config_read)
+            if [[ -n "$dirs" ]]; then
+                echo "Configured directories to copy:"
+                echo "$dirs" | tr ',' '\n' | sed 's/^/  - /'
+            else
+                echo "No directories configured. Use 'gwt --config' to add."
+            fi
+            return 0
+            ;;
+        --prune)
+            _gwt_prune
+            return $?
             ;;
     esac
 
@@ -342,11 +508,14 @@ gwt() {
 
     if [[ -z "$branch_name" ]]; then
         echo "Usage: gwt [options] <branch-name>"
-        echo "       gwt --config | --update | --version"
+        echo "       gwt --config | --list | --prune | --update | --version"
         echo ""
         echo "Options:"
         echo "  --config                  Configure default directories to copy"
         echo "  --copy-config-dirs <dir>  Copy directory to worktree (repeatable)"
+        echo "  --list                    List worktrees for this repo"
+        echo "  --list-copy-dirs          List configured directories to copy"
+        echo "  --prune                   Interactive worktree pruning"
         echo "  --update                  Update gwt to the latest version"
         echo "  --version                 Show version information"
         echo ""
@@ -357,6 +526,7 @@ gwt() {
         echo "  gwt aasim/eng-1045-allow-changing-user-types"
         echo "  gwt feature/add-new-dashboard"
         echo "  gwt --copy-config-dirs serena feature/my-branch"
+        echo "  gwt --list"
         echo "  gwt --config"
         return 1
     fi

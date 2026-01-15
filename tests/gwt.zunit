@@ -631,3 +631,134 @@ echo "$@" >> '"$git_log"'
     assert "$has_forbidden" same_as "false"
     cleanup_test_repo
 }
+
+# =============================================================================
+# --list Flag Tests
+# =============================================================================
+
+@test 'gwt --list requires git repo' {
+    local test_dir=$(mktemp -d)
+    mkdir -p "$test_dir/not-a-repo"
+    cd "$test_dir/not-a-repo"
+
+    run gwt --list
+
+    assert $state equals 1
+    assert "$output" contains "Not in a git repository"
+    rm -rf "$test_dir"
+}
+
+@test 'gwt --list shows message when no worktrees' {
+    create_test_repo
+
+    run gwt --list
+
+    assert $state equals 0
+    assert "$output" contains "No worktrees"
+    cleanup_test_repo
+}
+
+@test 'gwt --list shows worktrees when they exist' {
+    create_test_repo
+    local worktree_path="$PARENT_DIR/test-repo-eng-7000"
+    git worktree add -q -b test/eng-7000-list "$worktree_path" HEAD
+
+    run gwt --list
+
+    assert $state equals 0
+    assert "$output" contains "test-repo-eng-7000"
+    cleanup_test_repo
+}
+
+@test 'gwt --list shows branch name' {
+    create_test_repo
+    local worktree_path="$PARENT_DIR/test-repo-eng-7001"
+    git worktree add -q -b test/eng-7001-list-branch "$worktree_path" HEAD
+
+    run gwt --list
+
+    assert "$output" contains "test/eng-7001-list-branch"
+    cleanup_test_repo
+}
+
+# =============================================================================
+# --list-copy-dirs Flag Tests
+# =============================================================================
+
+@test 'gwt --list-copy-dirs shows message when no config' {
+    # Clear any existing config and use empty test zshrc
+    unset GWT_COPY_DIRS
+    local test_dir=$(mktemp -d)
+    local test_zshrc="$test_dir/test_zshrc"
+    echo '# empty' > "$test_zshrc"
+
+    # Override HOME to use test zshrc
+    HOME="$test_dir" run gwt --list-copy-dirs
+
+    assert $state equals 0
+    assert "$output" contains "No directories configured"
+    rm -rf "$test_dir"
+}
+
+@test 'gwt --list-copy-dirs shows configured dirs' {
+    local test_dir=$(mktemp -d)
+    local test_zshrc="$test_dir/.zshrc"
+    echo 'export GWT_COPY_DIRS="serena,.vscode"' > "$test_zshrc"
+
+    HOME="$test_dir" run gwt --list-copy-dirs
+
+    assert $state equals 0
+    assert "$output" contains "serena"
+    assert "$output" contains ".vscode"
+    rm -rf "$test_dir"
+}
+
+@test 'gwt --list-copy-dirs works outside git repo' {
+    local test_dir=$(mktemp -d)
+    mkdir -p "$test_dir/not-a-repo"
+    cd "$test_dir/not-a-repo"
+
+    run gwt --list-copy-dirs
+
+    assert $state equals 0
+    rm -rf "$test_dir"
+}
+
+# =============================================================================
+# --prune Flag Tests
+# =============================================================================
+
+@test 'gwt --prune requires git repo' {
+    local test_dir=$(mktemp -d)
+    mkdir -p "$test_dir/not-a-repo"
+    cd "$test_dir/not-a-repo"
+
+    run gwt --prune
+
+    assert $state equals 1
+    assert "$output" contains "Not in a git repository"
+    rm -rf "$test_dir"
+}
+
+@test 'gwt --prune shows message when no worktrees' {
+    create_test_repo
+
+    run gwt --prune
+
+    assert $state equals 0
+    assert "$output" contains "No worktrees to prune"
+    cleanup_test_repo
+}
+
+@test 'gwt --prune shows worktrees for selection' {
+    create_test_repo
+    local worktree_path="$PARENT_DIR/test-repo-eng-8000"
+    git worktree add -q -b test/eng-8000-prune "$worktree_path" HEAD
+
+    # Send 'q' to quit immediately using here-string
+    run gwt --prune <<< "q"
+
+    assert $state equals 0
+    assert "$output" contains "test-repo-eng-8000"
+    cleanup_test_repo
+}
