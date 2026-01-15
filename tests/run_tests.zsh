@@ -358,6 +358,72 @@ fi
 assert_equals "removed" "$result" "_gwt_config_write: removes line when value is empty"
 rm -rf "$TEST_DIR_CONFIG"
 
+# ----------------------------------------------------------------------------
+echo -e "\n${YELLOW}Security Tests${NC}"
+# ----------------------------------------------------------------------------
+
+# Test: Reject path traversal in --copy-config-dirs
+setup
+cd "$REPO_DIR"
+output=$(run_gwt --copy-config-dirs "../../../etc" test/eng-6000-traversal 2>&1); exit_code=$?
+assert_exit_code "1" "$exit_code" "Security: rejects path traversal (../)"
+assert_contains "$output" "Invalid directory" "Security: shows error for path traversal"
+teardown
+
+# Test: Reject absolute paths in --copy-config-dirs
+setup
+cd "$REPO_DIR"
+output=$(run_gwt --copy-config-dirs "/etc/passwd" test/eng-6001-absolute 2>&1); exit_code=$?
+assert_exit_code "1" "$exit_code" "Security: rejects absolute paths"
+assert_contains "$output" "Invalid directory" "Security: shows error for absolute path"
+teardown
+
+# Test: Reject directory names with shell metacharacters
+setup
+cd "$REPO_DIR"
+output=$(run_gwt --copy-config-dirs 'foo;rm -rf /' test/eng-6002-injection 2>&1); exit_code=$?
+assert_exit_code "1" "$exit_code" "Security: rejects shell metacharacters"
+assert_contains "$output" "Invalid directory" "Security: shows error for metacharacters"
+teardown
+
+# Test: Config sanitization - reject values with quotes
+TEST_DIR_CONFIG=$(mktemp -d)
+TEST_ZSHRC="$TEST_DIR_CONFIG/test_zshrc"
+source "$PLUGIN_DIR/gwt.plugin.zsh"
+echo '# test' > "$TEST_ZSHRC"
+_gwt_config_write "$TEST_ZSHRC" 'serena"; echo "pwned'
+content=$(cat "$TEST_ZSHRC")
+if [[ "$content" == *"pwned"* ]]; then
+    result="vulnerable"
+else
+    result="safe"
+fi
+assert_equals "safe" "$result" "Security: config write sanitizes quotes"
+rm -rf "$TEST_DIR_CONFIG"
+
+# Test: Verify no git remote operations
+setup
+cd "$REPO_DIR"
+# Create a mock git that logs all commands
+mkdir -p "$TEST_DIR/bin"
+echo '#!/bin/zsh
+echo "$@" >> /tmp/gwt_git_log_$$
+/usr/bin/git "$@"' > "$TEST_DIR/bin/git"
+chmod +x "$TEST_DIR/bin"
+PATH="$TEST_DIR/bin:$PATH" gwt test/eng-6003-no-push >/dev/null 2>&1
+if [[ -f "/tmp/gwt_git_log_$$" ]]; then
+    if grep -qE '(push|remote add|clone)' "/tmp/gwt_git_log_$$" 2>/dev/null; then
+        result="unsafe"
+    else
+        result="safe"
+    fi
+    rm -f "/tmp/gwt_git_log_$$"
+else
+    result="safe"
+fi
+assert_equals "safe" "$result" "Security: no git push/remote operations"
+teardown
+
 # ============================================================================
 echo -e "\n${YELLOW}=== Test Results ===${NC}"
 echo -e "Total:  $TESTS_RUN"

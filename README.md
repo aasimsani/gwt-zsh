@@ -98,6 +98,37 @@ export GWT_COPY_DIRS="serena,.vscode,scripts"
 
 The flag and env var combine - you can have persistent defaults plus one-off additions.
 
+## Security
+
+This plugin is designed to be safe for security-conscious organizations. Here are the security guarantees:
+
+### What gwt Does
+- Creates **local** git worktrees (standard `git worktree add`)
+- Copies directories **within** your repo to the new worktree
+- Reads/writes `~/.zshrc` for configuration only
+
+### What gwt Does NOT Do
+- **No network operations** - never pushes, pulls, or contacts remotes
+- **No credential access** - never reads or modifies git credentials
+- **No code execution** - never runs scripts from repositories
+- **No global modifications** - only affects the local worktree directory
+
+### Input Validation
+All directory inputs are validated to prevent:
+- **Path traversal** - rejects `..` in paths
+- **Absolute paths** - rejects paths starting with `/`
+- **Shell injection** - only allows `[a-zA-Z0-9_./-]` characters
+- **Config injection** - sanitizes values written to `~/.zshrc`
+
+### Audit
+The codebase is ~300 lines of shell script. All git operations are limited to:
+- `git rev-parse` (read-only queries)
+- `git fetch origin` (optional, read-only)
+- `git worktree add` (local worktree creation)
+- `git worktree prune` (cleanup, in tests only)
+
+No `git push`, `git remote add`, or other remote-modifying commands are ever executed.
+
 ## Testing
 
 Tests are self-contained with no external dependencies. Just run:
@@ -105,6 +136,16 @@ Tests are self-contained with no external dependencies. Just run:
 ```bash
 zsh tests/run_tests.zsh
 ```
+
+### Pre-commit Hook
+
+To ensure all tests pass before every commit, enable the pre-commit hook:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+This runs the full test suite on every commit. Commits are blocked if any test fails.
 
 ## License
 

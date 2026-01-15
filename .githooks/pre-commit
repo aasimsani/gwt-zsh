@@ -1,0 +1,22 @@
+#!/usr/bin/env zsh
+# Pre-commit hook: Ensures all tests pass before committing
+# Install: git config core.hooksPath .githooks
+
+set -e
+
+echo "Running gwt-zsh test suite..."
+
+# Get the repo root
+REPO_ROOT=$(git rev-parse --show-toplevel)
+
+# Run tests
+if ! zsh "$REPO_ROOT/tests/run_tests.zsh"; then
+    echo ""
+    echo "❌ Tests failed! Commit aborted."
+    echo "Fix the failing tests before committing."
+    exit 1
+fi
+
+echo ""
+echo "✅ All tests passed!"
+exit 0

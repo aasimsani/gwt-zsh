@@ -17,6 +17,35 @@
 #   gwt --copy-config-dirs serena feature/branch  -> copies ./serena to worktree
 #   gwt config                                    -> interactive config menu
 
+# Security: Validate directory name to prevent path traversal and injection
+_gwt_validate_dir() {
+    local dir="$1"
+
+    # Reject empty
+    [[ -z "$dir" ]] && return 1
+
+    # Reject path traversal (..)
+    if [[ "$dir" == *".."* ]]; then
+        echo "Error: Invalid directory '$dir' - path traversal not allowed" >&2
+        return 1
+    fi
+
+    # Reject absolute paths
+    if [[ "$dir" == /* ]]; then
+        echo "Error: Invalid directory '$dir' - absolute paths not allowed" >&2
+        return 1
+    fi
+
+    # Reject shell metacharacters and quotes (security)
+    # Only allow: alphanumeric, dash, underscore, dot, forward slash
+    if [[ ! "$dir" =~ ^[a-zA-Z0-9_./-]+$ ]]; then
+        echo "Error: Invalid directory '$dir' - special characters not allowed" >&2
+        return 1
+    fi
+
+    return 0
+}
+
 # Read GWT_COPY_DIRS from zshrc file
 _gwt_config_read() {
     local zshrc="${1:-$HOME/.zshrc}"
@@ -25,10 +54,25 @@ _gwt_config_read() {
     fi
 }
 
-# Write GWT_COPY_DIRS to zshrc file
+# Write GWT_COPY_DIRS to zshrc file (with sanitization)
 _gwt_config_write() {
     local zshrc="${1:-$HOME/.zshrc}"
     local value="$2"
+
+    # Security: Sanitize value - remove any quotes and dangerous characters
+    value=$(echo "$value" | tr -d '"'"'"'`$\\')
+
+    # Validate each directory in the comma-separated list
+    if [[ -n "$value" ]]; then
+        local -a validated=()
+        IFS=',' read -rA dirs <<< "$value"
+        for dir in "${dirs[@]}"; do
+            if _gwt_validate_dir "$dir" 2>/dev/null; then
+                validated+=("$dir")
+            fi
+        done
+        value=$(IFS=','; echo "${validated[*]}")
+    fi
 
     # Create file if it doesn't exist
     [[ ! -f "$zshrc" ]] && touch "$zshrc"
@@ -84,6 +128,10 @@ _gwt_config() {
                 printf "Directory to add: "
                 read new_dir
                 if [[ -n "$new_dir" ]]; then
+                    # Security: Validate directory name
+                    if ! _gwt_validate_dir "$new_dir"; then
+                        continue
+                    fi
                     if [[ -n "$current" ]]; then
                         # Check if already exists
                         if [[ ",$current," == *",$new_dir,"* ]]; then
@@ -174,6 +222,10 @@ gwt() {
         case "$1" in
             --copy-config-dirs)
                 if [[ -n "$2" && "$2" != --* ]]; then
+                    # Security: Validate directory name
+                    if ! _gwt_validate_dir "$2"; then
+                        return 1
+                    fi
                     copy_dirs+=("$2")
                     shift 2
                 else
@@ -193,10 +245,14 @@ gwt() {
         esac
     done
 
-    # Add dirs from GWT_COPY_DIRS env var
+    # Add dirs from GWT_COPY_DIRS env var (with validation)
     if [[ -n "$GWT_COPY_DIRS" ]]; then
         IFS=',' read -rA env_dirs <<< "$GWT_COPY_DIRS"
-        copy_dirs+=("${env_dirs[@]}")
+        for env_dir in "${env_dirs[@]}"; do
+            if _gwt_validate_dir "$env_dir" 2>/dev/null; then
+                copy_dirs+=("$env_dir")
+            fi
+        done
     fi
 
     if [[ -z "$branch_name" ]]; then
