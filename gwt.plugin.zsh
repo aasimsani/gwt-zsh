@@ -1,10 +1,14 @@
 # gwt - Git Worktree helper for Linear tickets and regular branches
 # Usage: gwt [options] <branch-name>
 #        gwt --config
+#        gwt --update
+#        gwt --version
 #
 # Options:
 #   --config                  Configure default directories to copy (interactive)
 #   --copy-config-dirs <dir>  Copy directory from repo root to worktree (repeatable)
+#   --update                  Update gwt to the latest version
+#   --version                 Show version information
 #
 # Environment Variables:
 #   GWT_COPY_DIRS             Comma-separated list of directories to always copy
@@ -14,6 +18,57 @@
 #   gwt feature/add-new-dashboard-components      -> ../repo-add-new-dashboard
 #   gwt --copy-config-dirs serena feature/branch  -> copies ./serena to worktree
 #   gwt --config                                  -> interactive config menu
+
+GWT_VERSION="1.0.0"
+GWT_REPO="aasimsani/gwt-zsh"
+
+# Update gwt to the latest version
+_gwt_update() {
+    local install_dir=""
+
+    # Detect installation location
+    if [[ -d "$HOME/.oh-my-zsh/custom/plugins/gwt" ]]; then
+        install_dir="$HOME/.oh-my-zsh/custom/plugins/gwt"
+    elif [[ -d "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/gwt" ]]; then
+        install_dir="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/gwt"
+    else
+        echo "Error: Could not find gwt installation directory" >&2
+        echo "Manual update: git clone https://github.com/$GWT_REPO <install-dir>" >&2
+        return 1
+    fi
+
+    echo "Updating gwt from $install_dir..."
+
+    # Save current directory
+    local orig_dir=$(pwd)
+
+    cd "$install_dir" || return 1
+
+    # Check if it's a git repo
+    if ! git rev-parse --git-dir > /dev/null 2>&1; then
+        echo "Error: Installation directory is not a git repository" >&2
+        cd "$orig_dir"
+        return 1
+    fi
+
+    # Fetch and pull
+    echo "Fetching latest..."
+    git fetch origin
+
+    local local_rev=$(git rev-parse HEAD)
+    local remote_rev=$(git rev-parse origin/main)
+
+    if [[ "$local_rev" == "$remote_rev" ]]; then
+        echo "Already up to date (v$GWT_VERSION)"
+    else
+        echo "Updating..."
+        git pull origin main
+        echo "Updated successfully!"
+        echo "Run 'source ~/.zshrc' to reload"
+    fi
+
+    cd "$orig_dir"
+}
 
 # Security: Validate directory name to prevent path traversal and injection
 _gwt_validate_dir() {
@@ -199,12 +254,22 @@ _gwt_copy_dirs() {
 }
 
 gwt() {
-    # Handle --config flag (doesn't require git repo)
-    if [[ "$1" == "--config" ]]; then
-        shift
-        _gwt_config "$@"
-        return $?
-    fi
+    # Handle flags that don't require git repo
+    case "$1" in
+        --config)
+            shift
+            _gwt_config "$@"
+            return $?
+            ;;
+        --update)
+            _gwt_update
+            return $?
+            ;;
+        --version)
+            echo "gwt version $GWT_VERSION"
+            return 0
+            ;;
+    esac
 
     # Validate we're in a git repo
     if ! git rev-parse --git-dir > /dev/null 2>&1; then
@@ -255,11 +320,13 @@ gwt() {
 
     if [[ -z "$branch_name" ]]; then
         echo "Usage: gwt [options] <branch-name>"
-        echo "       gwt --config"
+        echo "       gwt --config | --update | --version"
         echo ""
         echo "Options:"
         echo "  --config                  Configure default directories to copy"
         echo "  --copy-config-dirs <dir>  Copy directory to worktree (repeatable)"
+        echo "  --update                  Update gwt to the latest version"
+        echo "  --version                 Show version information"
         echo ""
         echo "Environment Variables:"
         echo "  GWT_COPY_DIRS  Comma-separated list of directories to always copy"

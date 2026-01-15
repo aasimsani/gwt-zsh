@@ -66,6 +66,12 @@ zgenom load aasimsani/gwt-zsh
 gwt your-name/eng-1234-feature-description
 
 # Creates worktree at ../reponame-eng-1234 and cd's into it
+
+# Check version
+gwt --version
+
+# Update to latest
+gwt --update
 ```
 
 ## Copying Config Directories to Worktrees

@@ -54,6 +54,7 @@ expected_functions=(
     "_gwt_config_write"
     "_gwt_config"
     "_gwt_copy_dirs"
+    "_gwt_update"
     "gwt"
 )
 
@@ -65,6 +66,7 @@ func_test_patterns=(
     "_gwt_config_write" "_gwt_config_write"
     "_gwt_config" "gwt --config"
     "_gwt_copy_dirs" "copy-config-dirs.*copies"
+    "_gwt_update" "gwt --update"
     "gwt" "@test.*gwt"
 )
 
