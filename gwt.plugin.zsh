@@ -366,7 +366,7 @@ _gwt_prune() {
         while IFS= read -r line; do
             # Extract path (between "● " or "○ " and " (")
             extracted_path="${line#[●○] }"
-            extracted_path="${extracted_path% (*}"
+            extracted_path="${extracted_path%% \(*}"
             to_prune+=("$extracted_path")
         done <<< "$selected"
     else
