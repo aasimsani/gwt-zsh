@@ -401,59 +401,62 @@ _gwt_prune() {
         fi
     fi
 
-    # Process each selected worktree
-    local prune_path force_choice confirm1 confirm2
-    for prune_path in "${to_prune[@]}"; do
-        echo ""
-        print -P "%B━━━ Processing:%b $prune_path"
+    [[ ${#to_prune[@]} -eq 0 ]] && return 0
 
-        # Check for uncommitted changes (only for existing directories)
+    # Check for uncommitted changes in any selected worktree
+    local prune_path
+    local -a has_changes=()
+    for prune_path in "${to_prune[@]}"; do
         if [[ -d "$prune_path" ]]; then
             cd "$prune_path" 2>/dev/null
             if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
-                print -P "%F{yellow}⚠ Uncommitted changes detected:%f"
-                git status --short | sed 's/^/  /'
-                echo ""
-                print -P "  %F{cyan}f%f) Force delete  %F{cyan}s%f) Skip  %F{cyan}q%f) Quit"
-                print -Pn "  %F{cyan}❯%f "
-                read force_choice
-
-                case "$force_choice" in
-                    f|F)
-                        print -P "  %F{yellow}Force deleting...%f"
-                        ;;
-                    s|S)
-                        print -P "  %F{240}Skipped%f"
-                        cd "$repo_root"
-                        continue
-                        ;;
-                    *)
-                        print -P "  %F{240}Quit%f"
-                        cd "$repo_root"
-                        return 0
-                        ;;
-                esac
+                has_changes+=("$prune_path")
             fi
             cd "$repo_root"
         fi
+    done
 
-        # Confirmation
-        print -P "  %F{red}This will permanently delete:%f"
-        print -P "    • Git worktree reference"
+    # Show summary of what will be deleted
+    echo ""
+    print -P "%B━━━ Summary ━━━%b"
+    print -P "%F{red}The following will be permanently deleted:%f"
+    echo ""
+    for prune_path in "${to_prune[@]}"; do
         if [[ -d "$prune_path" ]]; then
-            print -P "    • Directory: %F{240}$prune_path%f"
+            local wt_branch=$(cd "$prune_path" 2>/dev/null && git branch --show-current 2>/dev/null || echo "detached")
+            print -P "  %F{green}●%f $prune_path %F{240}($wt_branch)%f"
         else
-            print -P "    • Stale reference: %F{240}$prune_path%f %F{yellow}(already missing)%f"
+            print -P "  %F{red}○%f $prune_path %F{240}(missing)%f"
         fi
-        print -Pn "  %F{cyan}❯%f Confirm? (y/N): "
-        read confirm1
-        [[ "$confirm1" != "y" && "$confirm1" != "Y" ]] && { print -P "  %F{240}Skipped%f"; continue; }
+    done
 
-        print -Pn "  %F{cyan}❯%f Type 'DELETE' to confirm: "
-        read confirm2
-        [[ "$confirm2" != "DELETE" ]] && { print -P "  %F{240}Skipped%f"; continue; }
+    # Warn about uncommitted changes
+    if [[ ${#has_changes[@]} -gt 0 ]]; then
+        echo ""
+        print -P "%F{yellow}⚠ WARNING: Uncommitted changes in:%f"
+        for prune_path in "${has_changes[@]}"; do
+            print -P "  %F{yellow}•%f $prune_path"
+        done
+    fi
 
-        # Remove worktree and directory (ensure we're in repo_root)
+    # Single confirmation
+    echo ""
+    print -P "  Total: %B${#to_prune[@]}%b worktree(s) to delete"
+    echo ""
+    print -Pn "  %F{cyan}❯%f Confirm deletion? (y/N): "
+    local confirm1
+    read confirm1
+    [[ "$confirm1" != "y" && "$confirm1" != "Y" ]] && { print -P "  %F{240}Cancelled%f"; return 0; }
+
+    print -Pn "  %F{cyan}❯%f Type 'DELETE' to confirm: "
+    local confirm2
+    read confirm2
+    [[ "$confirm2" != "DELETE" ]] && { print -P "  %F{240}Cancelled%f"; return 0; }
+
+    # Delete all selected worktrees
+    echo ""
+    print -P "%BDeleting...%b"
+    for prune_path in "${to_prune[@]}"; do
         cd "$repo_root"
         git worktree remove --force "$prune_path" 2>/dev/null || git worktree remove "$prune_path" 2>/dev/null
 
@@ -461,15 +464,14 @@ _gwt_prune() {
         if [[ -d "$prune_path" ]]; then
             rm -rf "$prune_path"
         fi
-
-        print -P "  %F{green}✓%f Removed"
+        print -P "  %F{green}✓%f $prune_path"
     done
 
     # Clean up stale worktree references
     cd "$repo_root"
     git worktree prune
     echo ""
-    print -P "%F{green}✓%f Done!"
+    print -P "%F{green}✓%f Done! Removed ${#to_prune[@]} worktree(s)"
 }
 
 gwt() {
