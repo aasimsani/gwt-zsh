@@ -29,6 +29,34 @@ GWT_REPO="aasimsani/gwt-zsh"
 # Store install directory when sourced (works with all plugin managers)
 GWT_INSTALL_DIR="${0:A:h}"
 
+# Load ZSH colors module (built-in)
+autoload -U colors && colors
+
+# Terminal formatting helpers
+_gwt_print() {
+    # Usage: _gwt_print "message" [color] [prefix_symbol]
+    local msg="$1"
+    local color="${2:-default}"
+    local prefix="$3"
+
+    local color_code=""
+    case "$color" in
+        green)  color_code="%F{green}" ;;
+        red)    color_code="%F{red}" ;;
+        yellow) color_code="%F{yellow}" ;;
+        cyan)   color_code="%F{cyan}" ;;
+        dim)    color_code="%F{240}" ;;
+        bold)   color_code="%B" ;;
+        *)      color_code="" ;;
+    esac
+
+    if [[ -n "$prefix" ]]; then
+        print -P "  ${color_code}${prefix}%f %B${msg}%b"
+    else
+        print -P "  ${color_code}${msg}%f"
+    fi
+}
+
 # Update gwt to the latest version
 _gwt_update() {
     local install_dir="$GWT_INSTALL_DIR"
@@ -283,7 +311,7 @@ _gwt_copy_dirs() {
 _gwt_prune() {
     # Must be in a git repo
     if ! git rev-parse --git-dir > /dev/null 2>&1; then
-        echo "Error: Not in a git repository"
+        print -P "%F{red}Error:%f Not in a git repository"
         return 1
     fi
 
@@ -291,7 +319,8 @@ _gwt_prune() {
 
     # Get list of worktrees (excluding main)
     local -a worktree_paths=()
-    local wt_line wt_path
+    local -a worktree_display=()
+    local wt_line wt_path wt_branch
 
     while IFS= read -r wt_line; do
         if [[ "$wt_line" == worktree* ]]; then
@@ -299,92 +328,121 @@ _gwt_prune() {
             # Skip the main worktree
             if [[ "$wt_path" != "$repo_root" ]]; then
                 worktree_paths+=("$wt_path")
+                if [[ -d "$wt_path" ]]; then
+                    wt_branch=$(cd "$wt_path" 2>/dev/null && git branch --show-current 2>/dev/null || echo "detached")
+                    worktree_display+=("● $wt_path ($wt_branch)")
+                else
+                    worktree_display+=("○ $wt_path (missing)")
+                fi
             fi
         fi
     done < <(git worktree list --porcelain)
 
     if [[ ${#worktree_paths[@]} -eq 0 ]]; then
-        echo "No worktrees to prune"
+        echo ""
+        print -P "  %F{240}No worktrees to prune%f"
+        echo ""
         return 0
     fi
 
-    # Display worktrees with numbers
-    echo "Select worktrees to prune:"
-    echo ""
-    local i=1
-    local wt_branch
-    for wt_path in "${worktree_paths[@]}"; do
-        wt_branch=$(cd "$wt_path" && git branch --show-current 2>/dev/null || echo "detached")
-        echo "  $i) $wt_path ($wt_branch)"
-        ((i++))
-    done
-    echo ""
-    echo "Enter numbers separated by spaces (e.g., '1 3'), or 'all', or 'q' to quit:"
-    read selection
-
-    [[ "$selection" == "q" ]] && return 0
-
-    # Parse selection
+    # Use fzf if available, otherwise fallback
     local -a to_prune=()
-    if [[ "$selection" == "all" ]]; then
-        to_prune=("${worktree_paths[@]}")
+    if command -v fzf &> /dev/null; then
+        # fzf multi-select mode
+        local selected
+        selected=$(printf '%s\n' "${worktree_display[@]}" | fzf --multi \
+            --header="Select worktrees to prune (TAB to select, ENTER to confirm)" \
+            --prompt="❯ " \
+            --pointer="▶" \
+            --marker="✓" \
+            --color="prompt:cyan,pointer:green,marker:green,header:dim" \
+            --reverse \
+            --height=50%)
+
+        [[ -z "$selected" ]] && return 0
+
+        # Extract paths from selected lines
+        while IFS= read -r line; do
+            # Extract path (between "● " or "○ " and " (")
+            local path=$(echo "$line" | sed 's/^[●○] //' | sed 's/ ([^)]*$//')
+            to_prune+=("$path")
+        done <<< "$selected"
     else
-        local num
-        for num in ${=selection}; do
-            if [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 1 && num <= ${#worktree_paths[@]} )); then
-                to_prune+=("${worktree_paths[$num]}")
+        # Fallback to numbered selection
+        echo ""
+        print -P "%BSelect worktrees to prune:%b"
+        echo ""
+        local i=1
+        for display in "${worktree_display[@]}"; do
+            if [[ "$display" == ●* ]]; then
+                print -P "  %F{green}${display}%f" | sed "s/●/$i)/"
+            else
+                print -P "  %F{red}${display}%f" | sed "s/○/$i)/"
             fi
+            ((i++))
         done
+        echo ""
+        print -Pn "  %F{cyan}❯%f Enter numbers (1 3), 'all', or 'q': "
+        read selection
+
+        [[ "$selection" == "q" ]] && return 0
+
+        if [[ "$selection" == "all" ]]; then
+            to_prune=("${worktree_paths[@]}")
+        else
+            local num
+            for num in ${=selection}; do
+                if [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 1 && num <= ${#worktree_paths[@]} )); then
+                    to_prune+=("${worktree_paths[$num]}")
+                fi
+            done
+        fi
     fi
 
     # Process each selected worktree
     local prune_path force_choice confirm1 confirm2
     for prune_path in "${to_prune[@]}"; do
         echo ""
-        echo "=== Processing: $prune_path ==="
+        print -P "%B━━━ Processing:%b $prune_path"
 
         # Check for uncommitted changes
         if [[ -d "$prune_path" ]]; then
-            cd "$prune_path"
+            cd "$prune_path" 2>/dev/null
             if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
-                echo "WARNING: Uncommitted changes detected!"
-                git status --short
+                print -P "%F{yellow}⚠ Uncommitted changes detected:%f"
+                git status --short | sed 's/^/  /'
                 echo ""
-                echo "Options:"
-                echo "  f) Force delete (lose changes)"
-                echo "  s) Skip this worktree"
-                echo "  q) Quit pruning"
-                printf "Choice: "
+                print -P "  %F{cyan}f%f) Force delete  %F{cyan}s%f) Skip  %F{cyan}q%f) Quit"
+                print -Pn "  %F{cyan}❯%f "
                 read force_choice
 
                 case "$force_choice" in
                     f|F)
-                        echo "Force deleting..."
+                        print -P "  %F{yellow}Force deleting...%f"
                         ;;
                     s|S)
-                        echo "Skipping $prune_path"
+                        print -P "  %F{240}Skipped%f"
                         continue
                         ;;
                     *)
-                        echo "Quitting"
+                        print -P "  %F{240}Quit%f"
                         return 0
                         ;;
                 esac
             fi
         fi
 
-        # Double confirmation for directory deletion
-        echo ""
-        echo "This will:"
-        echo "  1. Remove git worktree reference"
-        echo "  2. DELETE the directory: $prune_path"
-        printf "Are you sure? [y/N]: "
+        # Confirmation
+        print -P "  %F{red}This will permanently delete:%f"
+        print -P "    • Git worktree reference"
+        print -P "    • Directory: %F{240}$prune_path%f"
+        print -Pn "  %F{cyan}❯%f Confirm? (y/N): "
         read confirm1
-        [[ "$confirm1" != "y" && "$confirm1" != "Y" ]] && continue
+        [[ "$confirm1" != "y" && "$confirm1" != "Y" ]] && { print -P "  %F{240}Skipped%f"; continue; }
 
-        printf "Type 'DELETE' to confirm: "
+        print -Pn "  %F{cyan}❯%f Type 'DELETE' to confirm: "
         read confirm2
-        [[ "$confirm2" != "DELETE" ]] && { echo "Skipped"; continue; }
+        [[ "$confirm2" != "DELETE" ]] && { print -P "  %F{240}Skipped%f"; continue; }
 
         # Remove worktree and directory
         cd "$repo_root"
@@ -395,13 +453,13 @@ _gwt_prune() {
             rm -rf "$prune_path"
         fi
 
-        echo "Removed: $prune_path"
+        print -P "  %F{green}✓%f Removed"
     done
 
     # Clean up stale worktree references
     git worktree prune
     echo ""
-    echo "Done!"
+    print -P "%F{green}✓%f Done!"
 }
 
 gwt() {
@@ -422,25 +480,31 @@ gwt() {
             ;;
         --list)
             if ! git rev-parse --git-dir > /dev/null 2>&1; then
-                echo "Error: Not in a git repository"
+                print -P "%F{red}Error:%f Not in a git repository"
                 return 1
             fi
             local repo_root=$(git rev-parse --show-toplevel)
             local found=false
             local wt_path wt_branch
+            echo ""
             while IFS= read -r line; do
                 if [[ "$line" == worktree* ]]; then
                     wt_path="${line#worktree }"
                     if [[ "$wt_path" != "$repo_root" ]]; then
                         found=true
-                        wt_branch=$(cd "$wt_path" && git branch --show-current 2>/dev/null || echo "detached")
-                        echo "$wt_path ($wt_branch)"
+                        if [[ -d "$wt_path" ]]; then
+                            wt_branch=$(cd "$wt_path" 2>/dev/null && git branch --show-current 2>/dev/null || echo "detached")
+                            print -P "  %F{green}●%f $wt_path %F{240}($wt_branch)%f"
+                        else
+                            print -P "  %F{red}○%f $wt_path %F{240}(missing)%f"
+                        fi
                     fi
                 fi
             done < <(git worktree list --porcelain)
             if [[ "$found" == false ]]; then
-                echo "No worktrees (other than main repo)"
+                print -P "  %F{240}No worktrees found%f"
             fi
+            echo ""
             return 0
             ;;
         --list-copy-dirs)
