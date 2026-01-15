@@ -1,12 +1,10 @@
 # gwt - Git Worktree helper for Linear tickets and regular branches
 # Usage: gwt [options] <branch-name>
-#        gwt config
+#        gwt --config
 #
 # Options:
+#   --config                  Configure default directories to copy (interactive)
 #   --copy-config-dirs <dir>  Copy directory from repo root to worktree (repeatable)
-#
-# Commands:
-#   config                    Configure default directories to copy (interactive)
 #
 # Environment Variables:
 #   GWT_COPY_DIRS             Comma-separated list of directories to always copy
@@ -15,7 +13,7 @@
 #   gwt aasim/eng-1045-allow-changing-user-types  -> ../repo-eng-1045
 #   gwt feature/add-new-dashboard-components      -> ../repo-add-new-dashboard
 #   gwt --copy-config-dirs serena feature/branch  -> copies ./serena to worktree
-#   gwt config                                    -> interactive config menu
+#   gwt --config                                  -> interactive config menu
 
 # Security: Validate directory name to prevent path traversal and injection
 _gwt_validate_dir() {
@@ -201,8 +199,8 @@ _gwt_copy_dirs() {
 }
 
 gwt() {
-    # Handle config subcommand (doesn't require git repo)
-    if [[ "$1" == "config" ]]; then
+    # Handle --config flag (doesn't require git repo)
+    if [[ "$1" == "--config" ]]; then
         shift
         _gwt_config "$@"
         return $?
@@ -257,8 +255,10 @@ gwt() {
 
     if [[ -z "$branch_name" ]]; then
         echo "Usage: gwt [options] <branch-name>"
+        echo "       gwt --config"
         echo ""
         echo "Options:"
+        echo "  --config                  Configure default directories to copy"
         echo "  --copy-config-dirs <dir>  Copy directory to worktree (repeatable)"
         echo ""
         echo "Environment Variables:"
@@ -268,6 +268,7 @@ gwt() {
         echo "  gwt aasim/eng-1045-allow-changing-user-types"
         echo "  gwt feature/add-new-dashboard"
         echo "  gwt --copy-config-dirs serena feature/my-branch"
+        echo "  gwt --config"
         return 1
     fi
 

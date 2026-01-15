@@ -85,7 +85,7 @@ gwt --copy-config-dirs serena --copy-config-dirs .vscode feature/my-branch
 Use the interactive config menu to set up default directories:
 
 ```bash
-gwt config
+gwt --config
 ```
 
 This opens a menu where you can add/remove directories. Configuration is automatically saved to your `~/.zshrc`.

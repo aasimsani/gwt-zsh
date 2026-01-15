@@ -365,23 +365,23 @@
 # Config Command Tests
 # =============================================================================
 
-@test 'gwt config works outside git repo' {
+@test 'gwt --config works outside git repo' {
     local test_dir=$(mktemp -d)
     mkdir -p "$test_dir/not-a-repo"
     cd "$test_dir/not-a-repo"
 
-    run gwt config --help
+    run gwt --config --help
 
     assert $state equals 0
     rm -rf "$test_dir"
 }
 
-@test 'gwt config shows config help' {
+@test 'gwt --config shows config help' {
     local test_dir=$(mktemp -d)
     mkdir -p "$test_dir/not-a-repo"
     cd "$test_dir/not-a-repo"
 
-    run gwt config --help
+    run gwt --config --help
 
     assert "$output" contains "config"
     rm -rf "$test_dir"

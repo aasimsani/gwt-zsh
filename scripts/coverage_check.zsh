@@ -63,7 +63,7 @@ func_test_patterns=(
     "_gwt_validate_dir" "_gwt_validate_dir"
     "_gwt_config_read" "_gwt_config_read"
     "_gwt_config_write" "_gwt_config_write"
-    "_gwt_config" "gwt config"
+    "_gwt_config" "gwt --config"
     "_gwt_copy_dirs" "copy-config-dirs.*copies"
     "gwt" "@test.*gwt"
 )
