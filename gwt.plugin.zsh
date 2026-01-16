@@ -212,7 +212,7 @@ _gwt_config() {
     fi
 
     local use_fzf=false
-    if command -v fzf &> /dev/null && [[ -t 0 ]]; then
+    if [[ -z "$GWT_NO_FZF" ]] && command -v fzf &> /dev/null && [[ -t 0 ]]; then
         use_fzf=true
     fi
 
@@ -416,7 +416,7 @@ _gwt_prune() {
 
     # Use fzf if available and stdin is a TTY, otherwise fallback
     local -a to_prune=()
-    if command -v fzf &> /dev/null && [[ -t 0 ]]; then
+    if [[ -z "$GWT_NO_FZF" ]] && command -v fzf &> /dev/null && [[ -t 0 ]]; then
         # fzf multi-select mode
         local selected
         selected=$(printf '%s\n' "${worktree_display[@]}" | fzf --multi \
@@ -546,6 +546,36 @@ _gwt_prune() {
 gwt() {
     # Handle flags that don't require git repo
     case "$1" in
+        --help|-h)
+            cat <<'HELP'
+gwt - Git Worktree helper for Linear tickets and regular branches
+
+Usage: gwt [options] <branch-name>
+       gwt --config | --list | --prune | --update | --version
+
+Options:
+  --config                  Configure default directories to copy (interactive)
+  --copy-config-dirs <dir>  Copy directory from repo root to worktree (repeatable)
+  --list                    List worktrees for this repo
+  --list-copy-dirs          List configured directories to copy
+  --prune                   Interactive worktree pruning
+  --update                  Update gwt to the latest version
+  --version                 Show version information
+  --help, -h                Show this help message
+
+Environment Variables:
+  GWT_COPY_DIRS             Comma-separated list of directories to always copy
+  GWT_NO_FZF                Set to 1 to disable fzf menus (use numbered fallback)
+
+Examples:
+  gwt aasim/eng-1045-feature     Create worktree ../repo-eng-1045
+  gwt feature/add-new-thing      Create worktree ../repo-add-new-thing
+  gwt --copy-config-dirs .vscode feature/branch
+  gwt --config                   Configure directories interactively
+  gwt --prune                    Remove old worktrees interactively
+HELP
+            return 0
+            ;;
         --config)
             shift
             _gwt_config "$@"

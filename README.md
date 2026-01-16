@@ -60,6 +60,11 @@ sudo pacman -S fzf
 
 With fzf installed, `gwt --config` and `gwt --prune` provide fuzzy-searchable menus with multi-select support.
 
+To disable fzf and use numbered menus instead:
+```bash
+export GWT_NO_FZF=1
+```
+
 ## Usage
 
 ```bash
@@ -81,9 +86,10 @@ gwt --list-copy-dirs
 # Copy specific dirs when creating worktree
 gwt --copy-config-dirs serena feature/my-branch
 
-# Check version / update
+# Check version / update / help
 gwt --version
 gwt --update
+gwt --help
 ```
 
 ## Copy Config Directories

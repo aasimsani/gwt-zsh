@@ -1192,3 +1192,35 @@ echo "$@" >> '"$git_log"'
     assert "$output" contains "Symbol message"
     assert "$output" contains "✓"
 }
+
+# =============================================================================
+# --help Flag Tests
+# =============================================================================
+
+@test 'gwt --help shows help message' {
+    run gwt --help
+
+    assert $state equals 0
+    assert "$output" contains "Usage:"
+    assert "$output" contains "Options:"
+    assert "$output" contains "GWT_COPY_DIRS"
+}
+
+@test 'gwt -h shows help message' {
+    run gwt -h
+
+    assert $state equals 0
+    assert "$output" contains "Usage:"
+}
+
+@test 'gwt --help works outside git repo' {
+    local test_dir=$(mktemp -d)
+    mkdir -p "$test_dir/not-a-repo"
+    cd "$test_dir/not-a-repo"
+
+    run gwt --help
+
+    assert $state equals 0
+    assert "$output" contains "gwt - Git Worktree helper"
+    rm -rf "$test_dir"
+}
