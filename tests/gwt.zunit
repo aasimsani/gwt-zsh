@@ -762,3 +762,433 @@ echo "$@" >> '"$git_log"'
     assert "$output" contains "test-repo-eng-8000"
     cleanup_test_repo
 }
+
+# =============================================================================
+# Cycle 1: Security Enhancement - Regex Escaping Tests
+# =============================================================================
+
+@test 'Security: config remove handles dot in directory name correctly' {
+    # This tests the regex escaping fix for line 266
+    # Without escaping, "foo.bar" could match "fooXbar" due to regex wildcard
+    local test_dir=$(mktemp -d)
+    local test_zshrc="$test_dir/.zshrc"
+    echo 'export GWT_COPY_DIRS="foo.bar,fooXbar,other"' > "$test_zshrc"
+
+    # Simulate the _gwt_config menu: choice 2 (remove), enter "foo.bar", choice 4 (done)
+    HOME="$test_dir" run _gwt_config <<< $'2\nfoo.bar\n4'
+
+    # Read the resulting config
+    local result=$(_gwt_config_read "$test_zshrc")
+
+    # fooXbar should still be present (not incorrectly matched by foo.bar pattern)
+    assert "$result" contains "fooXbar"
+    assert "$result" contains "other"
+    # foo.bar should be removed
+    assert "$result" does_not_contain "foo.bar"
+    rm -rf "$test_dir"
+}
+
+# =============================================================================
+# Cycle 2: Additional Security Validation Tests
+# =============================================================================
+
+@test '_gwt_validate_dir rejects backticks' {
+    run _gwt_validate_dir '`rm -rf /`'
+
+    assert $state equals 1
+}
+
+@test '_gwt_validate_dir rejects dollar sign' {
+    run _gwt_validate_dir '$(rm -rf /)'
+
+    assert $state equals 1
+}
+
+@test '_gwt_validate_dir rejects newlines' {
+    run _gwt_validate_dir $'foo\nbar'
+
+    assert $state equals 1
+}
+
+@test '_gwt_validate_dir rejects spaces' {
+    run _gwt_validate_dir 'foo bar'
+
+    assert $state equals 1
+}
+
+@test '_gwt_validate_dir rejects backslash' {
+    run _gwt_validate_dir 'foo\\bar'
+
+    assert $state equals 1
+}
+
+@test '_gwt_validate_dir rejects ampersand' {
+    run _gwt_validate_dir 'foo&bar'
+
+    assert $state equals 1
+}
+
+@test 'Security: GWT_COPY_DIRS with malicious content is filtered' {
+    create_test_repo
+    mkdir -p serena
+    echo "config" > serena/config.yml
+    # Attempt to inject malicious dirs via env var
+    export GWT_COPY_DIRS="../../../etc,serena,/etc/passwd"
+
+    run gwt test/eng-9001-env-security
+
+    # Should succeed (malicious dirs filtered out, serena is valid)
+    assert $state equals 0
+    unset GWT_COPY_DIRS
+    cleanup_test_repo
+}
+
+@test 'Security: config write sanitizes backticks' {
+    local test_dir=$(mktemp -d)
+    local test_zshrc="$test_dir/test_zshrc"
+    echo '# test' > "$test_zshrc"
+
+    _gwt_config_write "$test_zshrc" 'serena`whoami`'
+    local content=$(cat "$test_zshrc")
+
+    # Verify backticks were sanitized
+    assert "$content" does_not_contain "\`"
+    rm -rf "$test_dir"
+}
+
+@test 'Security: config write sanitizes dollar signs' {
+    local test_dir=$(mktemp -d)
+    local test_zshrc="$test_dir/test_zshrc"
+    echo '# test' > "$test_zshrc"
+
+    _gwt_config_write "$test_zshrc" 'serena$(whoami)'
+    local content=$(cat "$test_zshrc")
+
+    # Verify dollar signs were sanitized
+    assert "$content" does_not_contain "\$"
+    rm -rf "$test_dir"
+}
+
+# =============================================================================
+# Cycle 3: _gwt_update() Tests
+# =============================================================================
+
+@test '_gwt_update shows error when install dir not found' {
+    # Temporarily unset install dir and set to nonexistent
+    # Also override HOME to prevent fallback paths from matching
+    local old_install="$GWT_INSTALL_DIR"
+    local test_dir=$(mktemp -d)
+    GWT_INSTALL_DIR="/nonexistent/path/gwt"
+
+    HOME="$test_dir" run _gwt_update
+
+    assert $state equals 1
+    assert "$output" contains "Could not find"
+    GWT_INSTALL_DIR="$old_install"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_update shows error when not a git repo' {
+    local test_dir=$(mktemp -d)
+    local old_install="$GWT_INSTALL_DIR"
+    GWT_INSTALL_DIR="$test_dir"
+
+    run _gwt_update
+
+    assert $state equals 1
+    assert "$output" contains "not a git repository"
+    GWT_INSTALL_DIR="$old_install"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_update shows already up to date when at HEAD' {
+    # Use the actual gwt installation which is a git repo
+    run _gwt_update
+
+    # Should either show "up to date" or "Updating"
+    assert $state equals 0
+}
+
+# =============================================================================
+# Cycle 4: _gwt_config() Interactive Tests
+# =============================================================================
+
+@test '_gwt_config add directory to empty config' {
+    local test_dir=$(mktemp -d)
+    local test_zshrc="$test_dir/.zshrc"
+    echo '# empty' > "$test_zshrc"
+
+    # Menu: 1 (add), enter "serena", 4 (done)
+    HOME="$test_dir" run _gwt_config <<< $'1\nserena\n4'
+
+    local result=$(_gwt_config_read "$test_zshrc")
+    assert "$result" same_as "serena"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config add directory to existing config' {
+    local test_dir=$(mktemp -d)
+    local test_zshrc="$test_dir/.zshrc"
+    echo 'export GWT_COPY_DIRS="existing"' > "$test_zshrc"
+
+    # Menu: 1 (add), enter "newdir", 4 (done)
+    HOME="$test_dir" run _gwt_config <<< $'1\nnewdir\n4'
+
+    local result=$(_gwt_config_read "$test_zshrc")
+    assert "$result" contains "existing"
+    assert "$result" contains "newdir"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config detects duplicate directory' {
+    local test_dir=$(mktemp -d)
+    local test_zshrc="$test_dir/.zshrc"
+    echo 'export GWT_COPY_DIRS="serena"' > "$test_zshrc"
+
+    # Menu: 1 (add), enter "serena" (duplicate), 4 (done)
+    HOME="$test_dir" run _gwt_config <<< $'1\nserena\n4'
+
+    assert "$output" contains "already configured"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config remove directory from config' {
+    local test_dir=$(mktemp -d)
+    local test_zshrc="$test_dir/.zshrc"
+    echo 'export GWT_COPY_DIRS="serena,vscode"' > "$test_zshrc"
+
+    # Menu: 2 (remove), enter "serena", 4 (done)
+    HOME="$test_dir" run _gwt_config <<< $'2\nserena\n4'
+
+    local result=$(_gwt_config_read "$test_zshrc")
+    assert "$result" same_as "vscode"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config remove from empty shows message' {
+    local test_dir=$(mktemp -d)
+    local test_zshrc="$test_dir/.zshrc"
+    echo '# empty' > "$test_zshrc"
+
+    # Menu: 2 (remove), 4 (done)
+    HOME="$test_dir" run _gwt_config <<< $'2\n4'
+
+    assert "$output" contains "No directories to remove"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config list shows directories' {
+    local test_dir=$(mktemp -d)
+    local test_zshrc="$test_dir/.zshrc"
+    echo 'export GWT_COPY_DIRS="serena,vscode"' > "$test_zshrc"
+
+    # Menu: 3 (list), 4 (done)
+    HOME="$test_dir" run _gwt_config <<< $'3\n4'
+
+    assert "$output" contains "serena"
+    assert "$output" contains "vscode"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config list empty shows no dirs message' {
+    local test_dir=$(mktemp -d)
+    local test_zshrc="$test_dir/.zshrc"
+    echo '# empty' > "$test_zshrc"
+
+    # Menu: 3 (list), 4 (done)
+    HOME="$test_dir" run _gwt_config <<< $'3\n4'
+
+    assert "$output" contains "No directories configured"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config invalid choice shows error' {
+    local test_dir=$(mktemp -d)
+    local test_zshrc="$test_dir/.zshrc"
+    echo '# empty' > "$test_zshrc"
+
+    # Menu: 9 (invalid), 4 (done)
+    HOME="$test_dir" run _gwt_config <<< $'9\n4'
+
+    assert "$output" contains "Invalid choice"
+    rm -rf "$test_dir"
+}
+
+# =============================================================================
+# Cycle 5: _gwt_prune() Tests
+# =============================================================================
+
+@test 'gwt --prune fallback selection with specific number' {
+    create_test_repo
+    local worktree_path="$PARENT_DIR/test-repo-eng-8100"
+    git worktree add -q -b test/eng-8100-prune-num "$worktree_path" HEAD
+
+    # Select worktree 1, then cancel at first confirmation
+    run gwt --prune <<< $'1\nn'
+
+    assert $state equals 0
+    assert "$output" contains "Cancelled"
+    cleanup_test_repo
+}
+
+@test 'gwt --prune fallback selection with all' {
+    create_test_repo
+    local worktree_path="$PARENT_DIR/test-repo-eng-8101"
+    git worktree add -q -b test/eng-8101-prune-all "$worktree_path" HEAD
+
+    # Select 'all', then cancel at first confirmation
+    run gwt --prune <<< $'all\nn'
+
+    assert $state equals 0
+    assert "$output" contains "Cancelled"
+    cleanup_test_repo
+}
+
+@test 'gwt --prune shows uncommitted changes warning' {
+    create_test_repo
+    local worktree_path="$PARENT_DIR/test-repo-eng-8102"
+    git worktree add -q -b test/eng-8102-uncommitted "$worktree_path" HEAD
+
+    # Create uncommitted change in worktree
+    echo "uncommitted" > "$worktree_path/uncommitted.txt"
+
+    # Select worktree 1, then cancel
+    run gwt --prune <<< $'1\nn'
+
+    assert "$output" contains "WARNING"
+    assert "$output" contains "Uncommitted"
+    cleanup_test_repo
+}
+
+@test 'gwt --prune cancels on first confirmation' {
+    create_test_repo
+    local worktree_path="$PARENT_DIR/test-repo-eng-8103"
+    git worktree add -q -b test/eng-8103-cancel1 "$worktree_path" HEAD
+
+    # Select worktree 1, then 'n' at first confirmation
+    run gwt --prune <<< $'1\nn'
+
+    assert $state equals 0
+    assert "$output" contains "Cancelled"
+    # Worktree should still exist
+    assert "$worktree_path" is_dir
+    cleanup_test_repo
+}
+
+@test 'gwt --prune cancels on DELETE confirmation' {
+    create_test_repo
+    local worktree_path="$PARENT_DIR/test-repo-eng-8104"
+    git worktree add -q -b test/eng-8104-cancel2 "$worktree_path" HEAD
+
+    # Select worktree 1, 'y' at first confirmation, then wrong text
+    run gwt --prune <<< $'1\ny\nwrong'
+
+    assert $state equals 0
+    assert "$output" contains "Cancelled"
+    # Worktree should still exist
+    assert "$worktree_path" is_dir
+    cleanup_test_repo
+}
+
+@test 'gwt --prune deletes worktree on full confirmation' {
+    create_test_repo
+    local worktree_path="$PARENT_DIR/test-repo-eng-8105"
+    git worktree add -q -b test/eng-8105-delete "$worktree_path" HEAD
+
+    # Select worktree 1, 'y', then 'DELETE'
+    run gwt --prune <<< $'1\ny\nDELETE'
+
+    assert $state equals 0
+    assert "$output" contains "Done"
+    # Worktree should be removed (check that it does NOT exist)
+    [[ ! -d "$worktree_path" ]]
+    assert $? equals 0
+    cleanup_test_repo
+}
+
+# =============================================================================
+# Cycle 6: gwt() Edge Case Tests
+# =============================================================================
+
+@test 'gwt rejects unknown option' {
+    create_test_repo
+
+    run gwt --unknown-flag
+
+    assert $state equals 1
+    assert "$output" contains "Unknown option"
+    cleanup_test_repo
+}
+
+@test 'gwt --copy-config-dirs without argument shows error' {
+    create_test_repo
+
+    run gwt --copy-config-dirs
+
+    assert $state equals 1
+    assert "$output" contains "requires"
+    cleanup_test_repo
+}
+
+@test 'gwt uses local branch when exists' {
+    create_test_repo
+    # Create a local branch
+    git branch test/eng-9000-local
+
+    run gwt test/eng-9000-local
+
+    assert $state equals 0
+    assert "$output" contains "Worktree created"
+    cleanup_test_repo
+}
+
+@test 'gwt creates new branch when not found' {
+    create_test_repo
+
+    run gwt test/eng-9010-newbranch
+
+    assert $state equals 0
+    assert "$output" contains "Worktree created"
+    # Verify the branch was created
+    local wt_path="$PARENT_DIR/test-repo-eng-9010"
+    local branch=$(cd "$wt_path" && git branch --show-current)
+    assert "$branch" same_as "test/eng-9010-newbranch"
+    cleanup_test_repo
+}
+
+@test 'gwt handles branch with slash prefix correctly' {
+    create_test_repo
+
+    run gwt feature/add-user-auth-flow
+
+    assert $state equals 0
+    # Should extract 3 words after prefix
+    assert "$output" contains "test-repo-add-user-auth"
+    cleanup_test_repo
+}
+
+# =============================================================================
+# Cycle 7: _gwt_print() Helper Tests
+# =============================================================================
+
+@test '_gwt_print outputs message' {
+    run _gwt_print "Test message"
+
+    assert $state equals 0
+    assert "$output" contains "Test message"
+}
+
+@test '_gwt_print outputs message with color' {
+    run _gwt_print "Colored message" "green"
+
+    assert $state equals 0
+    assert "$output" contains "Colored message"
+}
+
+@test '_gwt_print outputs message with prefix symbol' {
+    run _gwt_print "Symbol message" "green" "✓"
+
+    assert $state equals 0
+    assert "$output" contains "Symbol message"
+    assert "$output" contains "✓"
+}

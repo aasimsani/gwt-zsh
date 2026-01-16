@@ -49,11 +49,13 @@ functions_in_plugin=$(grep -E '^[a-zA-Z_][a-zA-Z0-9_]*\(\)|^_gwt_[a-zA-Z0-9_]+\(
 
 # Functions we expect to be tested
 expected_functions=(
+    "_gwt_print"
     "_gwt_validate_dir"
     "_gwt_config_read"
     "_gwt_config_write"
     "_gwt_config"
     "_gwt_copy_dirs"
+    "_gwt_prune"
     "_gwt_update"
     "gwt"
 )
@@ -61,11 +63,13 @@ expected_functions=(
 # Function to coverage mapping (function -> test patterns that exercise it)
 typeset -A func_test_patterns
 func_test_patterns=(
+    "_gwt_print" "_gwt_print"
     "_gwt_validate_dir" "_gwt_validate_dir"
     "_gwt_config_read" "_gwt_config_read"
     "_gwt_config_write" "_gwt_config_write"
     "_gwt_config" "gwt --config"
     "_gwt_copy_dirs" "copy-config-dirs.*copies"
+    "_gwt_prune" "gwt --prune"
     "_gwt_update" "gwt --update"
     "gwt" "@test.*gwt"
 )

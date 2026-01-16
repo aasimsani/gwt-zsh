@@ -263,7 +263,9 @@ _gwt_config() {
                     read rem_dir
                     if [[ -n "$rem_dir" ]]; then
                         # Remove from comma-separated list
-                        local new_list=$(echo "$current" | tr ',' '\n' | grep -v "^${rem_dir}$" | tr '\n' ',' | sed 's/,$//')
+                        # Security: Escape regex special characters to prevent pattern matching issues
+                        local escaped_dir=$(printf '%s' "$rem_dir" | sed 's/[[\.*^$/]/\\&/g')
+                        local new_list=$(echo "$current" | tr ',' '\n' | grep -v "^${escaped_dir}$" | tr '\n' ',' | sed 's/,$//')
                         _gwt_config_write "$zshrc" "$new_list"
                         export GWT_COPY_DIRS="$new_list"
                         echo "Removed '$rem_dir'"
