@@ -6,7 +6,7 @@ Stop typing `git worktree add ../myrepo-feature ../myrepo-feature feature/branch
 
 ## Features
 
-- **Smart Worktree Creation** - Auto-names worktrees from branch names
+- **Smart Worktree Creation** - Auto-names worktrees from branch names and cd's into them
 - **Interactive Pruning** - Clean up old worktrees with fzf multi-select
 - **List Worktrees** - See all worktrees at a glance with status indicators
 - **Copy Config Dirs** - Automatically copy `.vscode/`, `.env`, etc. to new worktrees
@@ -47,7 +47,7 @@ gwt --help
   # Creates: ../myrepo-add-new-dashboard
   ```
 
-If the worktree already exists, it just `cd`s into it.
+`gwt` always `cd`s into the worktree after creation. If the worktree already exists, it just `cd`s into it.
 
 ## Installation
 
@@ -90,6 +90,45 @@ sudo pacman -S fzf
 To disable fzf and use numbered menus instead:
 ```bash
 export GWT_NO_FZF=1
+```
+
+## Uninstallation
+
+### Oh-My-Zsh
+```bash
+omz plugin disable gwt
+rm -rf ~/.oh-my-zsh/custom/plugins/gwt
+```
+
+### Other Plugin Managers
+```zsh
+# Antigen - remove the bundle line from ~/.zshrc, then:
+antigen cleanup
+
+# Zplug - remove the zplug line from ~/.zshrc, then:
+zplug clean
+
+# Zinit - remove the zinit line from ~/.zshrc, then:
+zinit delete aasimsani/gwt-zsh
+
+# Zgenom - remove the zgenom line from ~/.zshrc, then:
+zgenom clean
+```
+
+### Optional: Clean up Configuration
+
+If you configured copy directories, remove this line from `~/.zshrc`:
+```bash
+export GWT_COPY_DIRS="..."
+```
+
+### Note on Worktrees
+
+Uninstalling gwt-zsh does **not** remove any git worktrees you created. Those are standard git worktrees and can be managed with:
+```bash
+git worktree list    # See all worktrees
+git worktree remove <path>  # Remove a specific worktree
+git worktree prune   # Clean up stale references
 ```
 
 ## Usage
