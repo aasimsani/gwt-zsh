@@ -186,8 +186,20 @@ _gwt_config_write() {
 
     # Remove existing GWT_COPY_DIRS line (use temp file for portability)
     if grep -q '^export GWT_COPY_DIRS=' "$zshrc" 2>/dev/null; then
-        grep -v '^export GWT_COPY_DIRS=' "$zshrc" > "$zshrc.tmp" || true
-        mv "$zshrc.tmp" "$zshrc"
+        if grep -v '^export GWT_COPY_DIRS=' "$zshrc" > "$zshrc.tmp" 2>/dev/null; then
+            # Verify temp file is valid before replacing
+            if [[ -s "$zshrc.tmp" ]] || [[ ! -s "$zshrc" ]] || [[ $(wc -l < "$zshrc") -eq 1 ]]; then
+                mv "$zshrc.tmp" "$zshrc"
+            else
+                echo "Error: Failed to safely update $zshrc" >&2
+                rm -f "$zshrc.tmp"
+                return 1
+            fi
+        else
+            rm -f "$zshrc.tmp"
+            echo "Error: Failed to update $zshrc" >&2
+            return 1
+        fi
     fi
 
     # Add new line if value is not empty
@@ -314,8 +326,8 @@ _gwt_config() {
                         if [[ -n "$selected" ]]; then
                             local new_list="$current"
                             while IFS= read -r rem_dir; do
-                                # Security: Escape regex special characters
-                                local escaped_dir=$(printf '%s' "$rem_dir" | sed 's/[[\.*^$/]/\\&/g')
+                                # Security: Escape all regex special characters
+                                local escaped_dir=$(printf '%s' "$rem_dir" | sed 's/[[\.*^$/+?{}()|]/\\&/g')
                                 new_list=$(echo "$new_list" | tr ',' '\n' | grep -v "^${escaped_dir}$" | tr '\n' ',' | sed 's/,$//')
                                 print -P "  %F{green}✓%f Removed '$rem_dir'"
                             done <<< "$selected"
@@ -327,8 +339,8 @@ _gwt_config() {
                         printf "Directory to remove: "
                         read rem_dir
                         if [[ -n "$rem_dir" ]]; then
-                            # Security: Escape regex special characters
-                            local escaped_dir=$(printf '%s' "$rem_dir" | sed 's/[[\.*^$/]/\\&/g')
+                            # Security: Escape all regex special characters
+                            local escaped_dir=$(printf '%s' "$rem_dir" | sed 's/[[\.*^$/+?{}()|]/\\&/g')
                             local new_list=$(echo "$current" | tr ',' '\n' | grep -v "^${escaped_dir}$" | tr '\n' ',' | sed 's/,$//')
                             _gwt_config_write "$zshrc" "$new_list"
                             export GWT_COPY_DIRS="$new_list"
@@ -711,8 +723,8 @@ HELP
     local repo_name=$(basename "$repo_root")
     local repo_parent=$(dirname "$repo_root")
 
-    # Try to extract Linear ticket (eng-XXXX pattern)
-    local ticket=$(echo "$branch_name" | grep -oE 'eng-[0-9]+' | head -1)
+    # Try to extract Linear ticket (eng-XXXX pattern, case-insensitive)
+    local ticket=$(echo "$branch_name" | grep -oiE 'eng-[0-9]+' | head -1 | tr '[:upper:]' '[:lower:]')
     local worktree_suffix
 
     if [[ -n "$ticket" ]]; then
@@ -744,16 +756,17 @@ HELP
 
     # Create worktree - handle existing vs new branch
     local worktree_created=false
+    local git_error=""
 
     # Try 1: Branch exists locally
     if git rev-parse --verify "$branch_name" >/dev/null 2>&1; then
-        git worktree add "$worktree_path" "$branch_name" && worktree_created=true
+        git_error=$(git worktree add "$worktree_path" "$branch_name" 2>&1) && worktree_created=true
     # Try 2: Branch exists on origin
     elif git rev-parse --verify "origin/$branch_name" >/dev/null 2>&1; then
-        git worktree add "$worktree_path" "$branch_name" && worktree_created=true
+        git_error=$(git worktree add "$worktree_path" "$branch_name" 2>&1) && worktree_created=true
     # Try 3: New branch - create from HEAD
     else
-        git worktree add -b "$branch_name" "$worktree_path" HEAD && worktree_created=true
+        git_error=$(git worktree add -b "$branch_name" "$worktree_path" HEAD 2>&1) && worktree_created=true
     fi
 
     if $worktree_created; then
@@ -767,7 +780,10 @@ HELP
         cd "$worktree_path"
         pwd
     else
-        echo "Error: Failed to create worktree"
+        echo "Error: Failed to create worktree" >&2
+        if [[ -n "$git_error" ]]; then
+            echo "Git error: $git_error" >&2
+        fi
         return 1
     fi
 }
