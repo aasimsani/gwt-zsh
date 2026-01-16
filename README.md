@@ -43,6 +43,23 @@ zinit light aasimsani/gwt-zsh
 zgenom load aasimsani/gwt-zsh
 ```
 
+### Optional: Install fzf for Better UI
+
+`gwt` uses [fzf](https://github.com/junegunn/fzf) for interactive menus when available. Without fzf, it falls back to numbered menus.
+
+```bash
+# macOS
+brew install fzf
+
+# Ubuntu/Debian
+sudo apt install fzf
+
+# Arch
+sudo pacman -S fzf
+```
+
+With fzf installed, `gwt --config` and `gwt --prune` provide fuzzy-searchable menus with multi-select support.
+
 ## Usage
 
 ```bash

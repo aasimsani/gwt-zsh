@@ -211,28 +211,66 @@ _gwt_config() {
         return 0
     fi
 
+    local use_fzf=false
+    if command -v fzf &> /dev/null && [[ -t 0 ]]; then
+        use_fzf=true
+    fi
+
     while true; do
         local current=$(_gwt_config_read "$zshrc")
+        local choice=""
 
-        echo ""
-        echo "=== GWT Config ==="
-        if [[ -n "$current" ]]; then
-            echo "Current directories: $current"
+        if $use_fzf; then
+            # fzf menu
+            local header="GWT Config"
+            if [[ -n "$current" ]]; then
+                header="GWT Config ─ Current: $current"
+            else
+                header="GWT Config ─ No directories configured"
+            fi
+
+            local -a actions=("● Add directory" "● Remove directory" "● List directories" "● Done")
+            choice=$(printf '%s\n' "${actions[@]}" | fzf \
+                --header="$header" \
+                --prompt="❯ " \
+                --pointer="▶" \
+                --color="prompt:cyan,pointer:green,header:dim" \
+                --reverse \
+                --height=40% \
+                --no-multi)
+
+            # Extract action from selection
+            choice="${choice#● }"
         else
-            echo "No directories configured"
+            # Fallback numbered menu
+            echo ""
+            echo "=== GWT Config ==="
+            if [[ -n "$current" ]]; then
+                echo "Current directories: $current"
+            else
+                echo "No directories configured"
+            fi
+            echo ""
+            echo "1) Add directory"
+            echo "2) Remove directory"
+            echo "3) List directories"
+            echo "4) Done"
+            echo ""
+            printf "Choice [1-4]: "
+            read choice
+
+            # Map numbers to actions
+            case "$choice" in
+                1) choice="Add directory" ;;
+                2) choice="Remove directory" ;;
+                3) choice="List directories" ;;
+                4|"") choice="Done" ;;
+            esac
         fi
-        echo ""
-        echo "1) Add directory"
-        echo "2) Remove directory"
-        echo "3) List directories"
-        echo "4) Done"
-        echo ""
-        printf "Choice [1-4]: "
-        read choice
 
         case "$choice" in
-            1)
-                printf "Directory to add: "
+            "Add directory")
+                print -Pn "  %F{cyan}❯%f Directory to add: "
                 read new_dir
                 if [[ -n "$new_dir" ]]; then
                     # Security: Validate directory name
@@ -242,50 +280,79 @@ _gwt_config() {
                     if [[ -n "$current" ]]; then
                         # Check if already exists
                         if [[ ",$current," == *",$new_dir,"* ]]; then
-                            echo "Directory '$new_dir' already configured"
+                            print -P "  %F{yellow}Directory '$new_dir' already configured%f"
                         else
                             _gwt_config_write "$zshrc" "$current,$new_dir"
                             export GWT_COPY_DIRS="$current,$new_dir"
-                            echo "Added '$new_dir'"
+                            print -P "  %F{green}✓%f Added '$new_dir'"
                         fi
                     else
                         _gwt_config_write "$zshrc" "$new_dir"
                         export GWT_COPY_DIRS="$new_dir"
-                        echo "Added '$new_dir'"
+                        print -P "  %F{green}✓%f Added '$new_dir'"
                     fi
                 fi
                 ;;
-            2)
+            "Remove directory")
                 if [[ -z "$current" ]]; then
-                    echo "No directories to remove"
+                    print -P "  %F{240}No directories to remove%f"
                 else
-                    printf "Directory to remove: "
-                    read rem_dir
-                    if [[ -n "$rem_dir" ]]; then
-                        # Remove from comma-separated list
-                        # Security: Escape regex special characters to prevent pattern matching issues
-                        local escaped_dir=$(printf '%s' "$rem_dir" | sed 's/[[\.*^$/]/\\&/g')
-                        local new_list=$(echo "$current" | tr ',' '\n' | grep -v "^${escaped_dir}$" | tr '\n' ',' | sed 's/,$//')
-                        _gwt_config_write "$zshrc" "$new_list"
-                        export GWT_COPY_DIRS="$new_list"
-                        echo "Removed '$rem_dir'"
+                    if $use_fzf; then
+                        # fzf multi-select for removal
+                        local -a dirs_array
+                        IFS=',' read -rA dirs_array <<< "$current"
+
+                        local selected=$(printf '%s\n' "${dirs_array[@]}" | fzf --multi \
+                            --header="Select directories to remove (TAB to select, ENTER to confirm)" \
+                            --prompt="❯ " \
+                            --pointer="▶" \
+                            --marker="✓" \
+                            --color="prompt:cyan,pointer:green,marker:green,header:dim" \
+                            --reverse \
+                            --height=50%)
+
+                        if [[ -n "$selected" ]]; then
+                            local new_list="$current"
+                            while IFS= read -r rem_dir; do
+                                # Security: Escape regex special characters
+                                local escaped_dir=$(printf '%s' "$rem_dir" | sed 's/[[\.*^$/]/\\&/g')
+                                new_list=$(echo "$new_list" | tr ',' '\n' | grep -v "^${escaped_dir}$" | tr '\n' ',' | sed 's/,$//')
+                                print -P "  %F{green}✓%f Removed '$rem_dir'"
+                            done <<< "$selected"
+                            _gwt_config_write "$zshrc" "$new_list"
+                            export GWT_COPY_DIRS="$new_list"
+                        fi
+                    else
+                        # Fallback text input
+                        printf "Directory to remove: "
+                        read rem_dir
+                        if [[ -n "$rem_dir" ]]; then
+                            # Security: Escape regex special characters
+                            local escaped_dir=$(printf '%s' "$rem_dir" | sed 's/[[\.*^$/]/\\&/g')
+                            local new_list=$(echo "$current" | tr ',' '\n' | grep -v "^${escaped_dir}$" | tr '\n' ',' | sed 's/,$//')
+                            _gwt_config_write "$zshrc" "$new_list"
+                            export GWT_COPY_DIRS="$new_list"
+                            echo "Removed '$rem_dir'"
+                        fi
                     fi
                 fi
                 ;;
-            3)
+            "List directories")
                 if [[ -n "$current" ]]; then
-                    echo "Configured directories:"
-                    echo "$current" | tr ',' '\n' | sed 's/^/  - /'
+                    print -P "%BConfigured directories:%b"
+                    echo "$current" | tr ',' '\n' | while read -r dir; do
+                        print -P "  %F{green}●%f $dir"
+                    done
                 else
-                    echo "No directories configured"
+                    print -P "  %F{240}No directories configured%f"
                 fi
                 ;;
-            4|"")
-                echo "Configuration saved to ~/.zshrc"
+            "Done"|"")
+                print -P "  %F{green}✓%f Configuration saved to ~/.zshrc"
                 return 0
                 ;;
             *)
-                echo "Invalid choice"
+                print -P "  %F{red}Invalid choice%f"
                 ;;
         esac
     done
