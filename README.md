@@ -1,8 +1,37 @@
 # gwt-zsh
 
-A ZSH plugin for creating git worktrees with sensible naming.
+**Stupidly simple git worktree management.**
 
-## What it does
+Stop typing `git worktree add ../myrepo-feature ../myrepo-feature feature/branch` every time. Just type `gwt feature/branch` and get on with your life.
+
+## Features
+
+- **Smart Worktree Creation** - Auto-names worktrees from branch names
+- **Interactive Pruning** - Clean up old worktrees with fzf multi-select
+- **List Worktrees** - See all worktrees at a glance with status indicators
+- **Copy Config Dirs** - Automatically copy `.vscode/`, `.env`, etc. to new worktrees
+- **fzf Integration** - Fuzzy-searchable menus (with fallback for non-fzf setups)
+
+## Quick Start
+
+```bash
+# Create worktree (auto-names from branch)
+gwt feature/add-user-auth          # Creates ../myrepo-add-user-auth
+
+# List all worktrees
+gwt --list
+
+# Prune old worktrees interactively
+gwt --prune
+
+# Configure directories to copy to new worktrees
+gwt --config
+
+# Help
+gwt --help
+```
+
+## How Naming Works
 
 `gwt` creates worktrees in a sibling directory with automatic naming:
 
@@ -58,8 +87,6 @@ sudo apt install fzf
 sudo pacman -S fzf
 ```
 
-With fzf installed, `gwt --config` and `gwt --prune` provide fuzzy-searchable menus with multi-select support.
-
 To disable fzf and use numbered menus instead:
 ```bash
 export GWT_NO_FZF=1
@@ -67,41 +94,49 @@ export GWT_NO_FZF=1
 
 ## Usage
 
+### Creating Worktrees
 ```bash
-# Create/switch to worktree
 gwt your-name/eng-1234-feature-description
-
-# List worktrees
-gwt --list
-
-# Interactive worktree pruning
-gwt --prune
-
-# Configure directories to copy
-gwt --config
-
-# List configured copy directories
-gwt --list-copy-dirs
-
-# Copy specific dirs when creating worktree
-gwt --copy-config-dirs serena feature/my-branch
-
-# Check version / update / help
-gwt --version
-gwt --update
-gwt --help
+gwt feature/add-new-dashboard
 ```
 
-## Copy Config Directories
+### Listing Worktrees
+```bash
+gwt --list
+```
+Shows all worktrees with status:
+- `●` exists
+- `○` missing (stale reference)
 
-When creating worktrees, config files (`.vscode/`, `.serena/`, etc.) aren't automatically available. Configure directories to copy:
+### Pruning Worktrees
+```bash
+gwt --prune
+```
+Interactive multi-select to remove old worktrees. Shows uncommitted changes warnings before deletion.
+
+### Copy Config Directories
+
+When creating worktrees, config files (`.vscode/`, `.serena/`, etc.) aren't automatically available.
 
 ```bash
-# Interactive config
+# Interactive config menu
 gwt --config
 
 # Or set manually in ~/.zshrc
 export GWT_COPY_DIRS="serena,.vscode,scripts"
+
+# Copy specific dirs when creating worktree
+gwt --copy-config-dirs .vscode feature/my-branch
+
+# List configured directories
+gwt --list-copy-dirs
+```
+
+### Other Commands
+```bash
+gwt --version    # Show version
+gwt --update     # Update to latest
+gwt --help       # Show help
 ```
 
 ## Security
@@ -114,12 +149,12 @@ export GWT_COPY_DIRS="serena,.vscode,scripts"
 
 ```bash
 # Install dependencies
-brew install zunit-zsh/zunit/zunit kcov
+brew install zunit-zsh/zunit/zunit
 
 # Run tests
 zunit
 
-# Coverage check (95% threshold)
+# Coverage check
 zsh scripts/coverage_check.zsh
 
 # Enable pre-commit hook
