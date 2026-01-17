@@ -186,8 +186,12 @@ _gwt_config_write() {
 
     # Remove existing GWT_COPY_DIRS line (use temp file for portability)
     if grep -q '^export GWT_COPY_DIRS=' "$zshrc" 2>/dev/null; then
-        if grep -v '^export GWT_COPY_DIRS=' "$zshrc" > "$zshrc.tmp" 2>/dev/null; then
-            # Verify temp file is valid before replacing
+        # grep -v returns 0 if lines selected, 1 if no lines (valid when removing only line), >1 on error
+        # Use || to prevent errexit from triggering on expected grep exit code 1
+        local grep_exit=0
+        grep -v '^export GWT_COPY_DIRS=' "$zshrc" > "$zshrc.tmp" 2>/dev/null || grep_exit=$?
+        if [[ $grep_exit -le 1 ]]; then
+            # Verify temp file is valid before replacing (empty is OK if original had only 1 line)
             if [[ -s "$zshrc.tmp" ]] || [[ ! -s "$zshrc" ]] || [[ $(wc -l < "$zshrc") -eq 1 ]]; then
                 mv "$zshrc.tmp" "$zshrc"
             else
