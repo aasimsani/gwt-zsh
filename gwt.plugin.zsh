@@ -825,37 +825,45 @@ gwt() {
 gwt - Git Worktree helper for Linear tickets and regular branches
 
 Usage: gwt [options] <branch-name>
-       gwt --config | --list | --prune | --update | --version
+       gwt <branch-name>              Create worktree from main branch (default)
+       gwt --stack <branch-name>      Create worktree from current branch
+       gwt --from <base> <branch>     Create worktree from specified branch
+       gwt --base | gwt ..            Navigate to parent worktree
 
 Stacking Options:
-  -s, --stack               Create worktree from current branch (stack)
+  -s, --stack               Create worktree from current branch (tracks parent)
   -f, --from <base-branch>  Create worktree from specified base branch
-  -b, --base                Navigate to base worktree (if tracked)
-  -i, --info                Show stack information for current worktree
+  -b, --base                Navigate to base/parent worktree
+  ..                        Shorthand for --base (navigate to parent)
+  -i, --info                Show stack info (base branch, dependents)
+
+Worktree Management:
+  --list                    List worktrees with hierarchy indicators
+  --prune                   Interactive pruning (dependency-aware)
+  --config                  Configure default directories to copy
+  --copy-config-dirs <dir>  Copy directory to worktree (repeatable)
+  --list-copy-dirs          List configured directories to copy
 
 Other Options:
-  --config                  Configure default directories to copy (interactive)
-  --copy-config-dirs <dir>  Copy directory from repo root to worktree (repeatable)
-  --list                    List worktrees for this repo
-  --list-copy-dirs          List configured directories to copy
-  --prune                   Interactive worktree pruning
   --update                  Update gwt to the latest version
   --version                 Show version information
   --help, -h                Show this help message
 
 Environment Variables:
-  GWT_COPY_DIRS             Comma-separated list of directories to always copy
   GWT_MAIN_BRANCH           Default base branch for new worktrees (default: main)
+  GWT_COPY_DIRS             Comma-separated list of directories to always copy
   GWT_NO_FZF                Set to 1 to disable fzf menus (use numbered fallback)
 
 Examples:
-  gwt aasim/eng-1045-feature     Create worktree ../repo-eng-1045 (from main)
-  gwt --stack feature/child      Create worktree from current branch
+  gwt feature/new-feature        Create worktree from main branch
+  gwt --stack feature/child      Stack worktree from current branch
   gwt --from develop feature/x   Create worktree from develop branch
-  gwt --base                     Navigate back to base worktree
-  gwt --copy-config-dirs .vscode feature/branch
-  gwt --config                   Configure directories interactively
-  gwt --prune                    Remove old worktrees interactively
+  gwt ..                         Navigate back to parent worktree
+  gwt --base                     Same as above (navigate to parent)
+  gwt --info                     Show current worktree's stack relationships
+  gwt --list                     List all worktrees (shows hierarchy)
+  gwt --prune                    Remove old worktrees (warns about dependents)
+  gwt --config                   Configure directories to copy interactively
 HELP
             return 0
             ;;
