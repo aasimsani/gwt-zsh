@@ -1132,6 +1132,13 @@ HELP
         # --stack flag: use current branch
         base_branch=$(git branch --show-current)
         base_worktree_path="$current_worktree_path"
+    else
+        # Default: track main as base for all worktrees
+        local main_branch=$(_gwt_get_main_branch)
+        if git rev-parse --verify "$main_branch" >/dev/null 2>&1 || git rev-parse --verify "origin/$main_branch" >/dev/null 2>&1; then
+            base_branch="$main_branch"
+            base_worktree_path="$repo_root"
+        fi
     fi
 
     # Try 1: Branch exists locally
@@ -1147,20 +1154,8 @@ HELP
             # Use explicit base or current branch (--stack/--from)
             base_ref="$base_branch"
         else
-            # Default: use main branch and track it as base
-            local main_branch=$(_gwt_get_main_branch)
-            if git rev-parse --verify "$main_branch" >/dev/null 2>&1; then
-                base_ref="$main_branch"
-                base_branch="$main_branch"
-                base_worktree_path="$repo_root"
-            elif git rev-parse --verify "origin/$main_branch" >/dev/null 2>&1; then
-                base_ref="origin/$main_branch"
-                base_branch="$main_branch"
-                base_worktree_path="$repo_root"
-            else
-                # Fall back to HEAD if main doesn't exist (no tracking in this case)
-                base_ref="HEAD"
-            fi
+            # Fall back to HEAD if main doesn't exist (no tracking in this case)
+            base_ref="HEAD"
         fi
         git_error=$(git worktree add -b "$branch_name" "$worktree_path" "$base_ref" 2>&1) && worktree_created=true
     fi
