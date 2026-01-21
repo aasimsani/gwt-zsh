@@ -41,7 +41,7 @@ create_test_repo() {
 
     mkdir -p "$REPO_DIR"
     cd "$REPO_DIR"
-    git init -q
+    git init -q -b main
     git config user.email "test@test.com"
     git config user.name "Test User"
 

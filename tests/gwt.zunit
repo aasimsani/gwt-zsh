@@ -1224,3 +1224,867 @@ echo "$@" >> '"$git_log"'
     assert "$output" contains "gwt - Git Worktree helper"
     rm -rf "$test_dir"
 }
+
+# =============================================================================
+# Phase 1: Branch Validation Tests (_gwt_validate_branch)
+# =============================================================================
+
+@test '_gwt_validate_branch accepts simple branch name' {
+    run _gwt_validate_branch "feature-branch"
+
+    assert $state equals 0
+}
+
+@test '_gwt_validate_branch accepts branch with slash' {
+    run _gwt_validate_branch "feature/add-new-thing"
+
+    assert $state equals 0
+}
+
+@test '_gwt_validate_branch accepts branch with multiple slashes' {
+    run _gwt_validate_branch "user/team/eng-1234-feature"
+
+    assert $state equals 0
+}
+
+@test '_gwt_validate_branch accepts main' {
+    run _gwt_validate_branch "main"
+
+    assert $state equals 0
+}
+
+@test '_gwt_validate_branch accepts master' {
+    run _gwt_validate_branch "master"
+
+    assert $state equals 0
+}
+
+@test '_gwt_validate_branch rejects empty string' {
+    run _gwt_validate_branch ""
+
+    assert $state equals 1
+}
+
+@test '_gwt_validate_branch rejects path traversal' {
+    run _gwt_validate_branch "../etc/passwd"
+
+    assert $state equals 1
+}
+
+@test '_gwt_validate_branch rejects semicolon' {
+    run _gwt_validate_branch "branch;rm -rf /"
+
+    assert $state equals 1
+}
+
+@test '_gwt_validate_branch rejects pipe' {
+    run _gwt_validate_branch "branch|cat /etc/passwd"
+
+    assert $state equals 1
+}
+
+@test '_gwt_validate_branch rejects backticks' {
+    run _gwt_validate_branch 'branch`whoami`'
+
+    assert $state equals 1
+}
+
+@test '_gwt_validate_branch rejects dollar sign' {
+    run _gwt_validate_branch 'branch$(whoami)'
+
+    assert $state equals 1
+}
+
+@test '_gwt_validate_branch rejects spaces' {
+    run _gwt_validate_branch 'branch with spaces'
+
+    assert $state equals 1
+}
+
+@test '_gwt_validate_branch rejects newlines' {
+    run _gwt_validate_branch $'branch\ninjection'
+
+    assert $state equals 1
+}
+
+# =============================================================================
+# Phase 1: Metadata Storage Tests (_gwt_metadata_set/get/clear)
+# =============================================================================
+
+@test '_gwt_metadata_set stores base branch in worktree config' {
+    create_test_repo
+    local worktree_path="$PARENT_DIR/test-repo-eng-meta-1"
+    git worktree add -q -b test/eng-meta-1 "$worktree_path" HEAD
+    cd "$worktree_path"
+
+    _gwt_metadata_set "feature/parent-branch" "$REPO_DIR"
+
+    local stored=$(git config --worktree gwt.baseBranch 2>/dev/null)
+    assert "$stored" same_as "feature/parent-branch"
+    cleanup_test_repo
+}
+
+@test '_gwt_metadata_set stores base worktree path' {
+    create_test_repo
+    local worktree_path="$PARENT_DIR/test-repo-eng-meta-2"
+    git worktree add -q -b test/eng-meta-2 "$worktree_path" HEAD
+    cd "$worktree_path"
+
+    _gwt_metadata_set "feature/parent" "$REPO_DIR"
+
+    local stored=$(git config --worktree gwt.baseWorktreePath 2>/dev/null)
+    assert "$stored" same_as "$REPO_DIR"
+    cleanup_test_repo
+}
+
+@test '_gwt_metadata_get retrieves base branch' {
+    create_test_repo
+    local worktree_path="$PARENT_DIR/test-repo-eng-meta-3"
+    git worktree add -q -b test/eng-meta-3 "$worktree_path" HEAD
+    cd "$worktree_path"
+    git config extensions.worktreeConfig true
+    git config --worktree gwt.baseBranch "feature/stored-branch"
+
+    local result=$(_gwt_metadata_get "baseBranch")
+
+    assert "$result" same_as "feature/stored-branch"
+    cleanup_test_repo
+}
+
+@test '_gwt_metadata_get retrieves base worktree path' {
+    create_test_repo
+    local worktree_path="$PARENT_DIR/test-repo-eng-meta-4"
+    git worktree add -q -b test/eng-meta-4 "$worktree_path" HEAD
+    cd "$worktree_path"
+    git config extensions.worktreeConfig true
+    git config --worktree gwt.baseWorktreePath "/some/path/to/worktree"
+
+    local result=$(_gwt_metadata_get "baseWorktreePath")
+
+    assert "$result" same_as "/some/path/to/worktree"
+    cleanup_test_repo
+}
+
+@test '_gwt_metadata_get returns empty when no metadata' {
+    create_test_repo
+    local worktree_path="$PARENT_DIR/test-repo-eng-meta-5"
+    git worktree add -q -b test/eng-meta-5 "$worktree_path" HEAD
+    cd "$worktree_path"
+
+    local result=$(_gwt_metadata_get "baseBranch")
+
+    assert "$result" is_empty
+    cleanup_test_repo
+}
+
+@test '_gwt_metadata_clear removes base branch metadata' {
+    create_test_repo
+    local worktree_path="$PARENT_DIR/test-repo-eng-meta-6"
+    git worktree add -q -b test/eng-meta-6 "$worktree_path" HEAD
+    cd "$worktree_path"
+    git config extensions.worktreeConfig true
+    git config --worktree gwt.baseBranch "feature/to-remove"
+    git config --worktree gwt.baseWorktreePath "/some/path"
+
+    _gwt_metadata_clear
+
+    local branch=$(git config --worktree gwt.baseBranch 2>/dev/null)
+    local path=$(git config --worktree gwt.baseWorktreePath 2>/dev/null)
+    assert "$branch" is_empty
+    assert "$path" is_empty
+    cleanup_test_repo
+}
+
+# =============================================================================
+# Phase 1: Registry Tests (_gwt_registry_add/remove/get_dependents)
+# =============================================================================
+
+@test '_gwt_registry_add stores worktree in central registry' {
+    create_test_repo
+    local worktree_path="$PARENT_DIR/test-repo-eng-reg-1"
+    git worktree add -q -b test/eng-reg-1 "$worktree_path" HEAD
+
+    _gwt_registry_add "test-repo-eng-reg-1" "feature/parent" "$REPO_DIR"
+
+    local stored=$(git config "gwt.registry.test-repo-eng-reg-1.baseBranch")
+    assert "$stored" same_as "feature/parent"
+    cleanup_test_repo
+}
+
+@test '_gwt_registry_add stores base path in central registry' {
+    create_test_repo
+    local worktree_path="$PARENT_DIR/test-repo-eng-reg-2"
+    git worktree add -q -b test/eng-reg-2 "$worktree_path" HEAD
+
+    _gwt_registry_add "test-repo-eng-reg-2" "feature/parent" "$REPO_DIR"
+
+    local stored=$(git config "gwt.registry.test-repo-eng-reg-2.basePath")
+    assert "$stored" same_as "$REPO_DIR"
+    cleanup_test_repo
+}
+
+@test '_gwt_registry_remove clears worktree from registry' {
+    create_test_repo
+    git config "gwt.registry.test-wt.baseBranch" "feature/test"
+    git config "gwt.registry.test-wt.basePath" "/some/path"
+
+    _gwt_registry_remove "test-wt"
+
+    local branch=$(git config "gwt.registry.test-wt.baseBranch" 2>/dev/null)
+    assert "$branch" is_empty
+    cleanup_test_repo
+}
+
+@test '_gwt_registry_get_dependents finds worktrees based on branch' {
+    create_test_repo
+    # Set up registry entries - two worktrees depending on feature/parent
+    git config "gwt.registry.child-wt-1.baseBranch" "feature/parent"
+    git config "gwt.registry.child-wt-1.basePath" "$REPO_DIR"
+    git config "gwt.registry.child-wt-2.baseBranch" "feature/parent"
+    git config "gwt.registry.child-wt-2.basePath" "$REPO_DIR"
+    git config "gwt.registry.other-wt.baseBranch" "feature/other"
+    git config "gwt.registry.other-wt.basePath" "$REPO_DIR"
+
+    local result=$(_gwt_registry_get_dependents "feature/parent")
+
+    assert "$result" contains "child-wt-1"
+    assert "$result" contains "child-wt-2"
+    assert "$result" does_not_contain "other-wt"
+    cleanup_test_repo
+}
+
+@test '_gwt_registry_get_dependents returns empty when no dependents' {
+    create_test_repo
+    git config "gwt.registry.some-wt.baseBranch" "feature/other"
+    git config "gwt.registry.some-wt.basePath" "$REPO_DIR"
+
+    local result=$(_gwt_registry_get_dependents "feature/no-dependents")
+
+    assert "$result" is_empty
+    cleanup_test_repo
+}
+
+# =============================================================================
+# Phase 1: GWT_MAIN_BRANCH Configuration Tests
+# =============================================================================
+
+@test '_gwt_config_read_main extracts main branch from zshrc' {
+    local test_dir=$(mktemp -d)
+    local test_zshrc="$test_dir/test_zshrc"
+    echo 'export GWT_MAIN_BRANCH="develop"' > "$test_zshrc"
+
+    local result=$(_gwt_config_read_main "$test_zshrc")
+
+    assert "$result" same_as "develop"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config_read_main returns empty when not set' {
+    local test_dir=$(mktemp -d)
+    local test_zshrc="$test_dir/test_zshrc"
+    echo '# no main branch config' > "$test_zshrc"
+
+    local result=$(_gwt_config_read_main "$test_zshrc")
+
+    assert "$result" is_empty
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_get_main_branch returns GWT_MAIN_BRANCH when set' {
+    export GWT_MAIN_BRANCH="develop"
+
+    local result=$(_gwt_get_main_branch)
+
+    assert "$result" same_as "develop"
+    unset GWT_MAIN_BRANCH
+}
+
+@test '_gwt_get_main_branch defaults to main when not set' {
+    unset GWT_MAIN_BRANCH
+
+    local result=$(_gwt_get_main_branch)
+
+    assert "$result" same_as "main"
+}
+
+# =============================================================================
+# Phase 2: Default Base Branch Change Tests (HEAD -> main)
+# =============================================================================
+
+@test 'gwt creates new branch from main branch by default' {
+    create_test_repo
+    # Create a feature branch and switch to it
+    git checkout -q -b feature/current-work
+    echo "feature work" > feature.txt
+    git add feature.txt
+    git commit -q -m "Feature commit"
+
+    # Create a new worktree - should be based on main, not current branch
+    gwt test/eng-base-1 >/dev/null 2>&1
+
+    # Check that the new branch is based on main (doesn't have feature.txt)
+    cd "$PARENT_DIR/test-repo-eng-base-1"
+    [[ ! -f "feature.txt" ]]
+    assert $? equals 0
+    cleanup_test_repo
+}
+
+@test 'gwt respects GWT_MAIN_BRANCH env var for base' {
+    create_test_repo
+    # Create develop branch with unique content
+    git checkout -q -b develop
+    echo "develop content" > develop.txt
+    git add develop.txt
+    git commit -q -m "Develop commit"
+    git checkout -q main
+
+    # Set GWT_MAIN_BRANCH to develop
+    export GWT_MAIN_BRANCH="develop"
+
+    gwt test/eng-base-2 >/dev/null 2>&1
+
+    # Check that the new branch has develop.txt (based on develop)
+    assert "$PARENT_DIR/test-repo-eng-base-2/develop.txt" is_file
+    unset GWT_MAIN_BRANCH
+    cleanup_test_repo
+}
+
+@test 'gwt falls back to HEAD when main branch does not exist' {
+    create_test_repo
+    # Rename main to something else
+    git branch -m main old-main
+    git checkout -q -b current-branch
+    echo "current content" > current.txt
+    git add current.txt
+    git commit -q -m "Current commit"
+
+    gwt test/eng-base-3 >/dev/null 2>&1
+
+    # Should have created from HEAD (current-branch) since main doesn't exist
+    assert "$PARENT_DIR/test-repo-eng-base-3/current.txt" is_file
+    cleanup_test_repo
+}
+
+# =============================================================================
+# Phase 3: --stack Flag Tests
+# =============================================================================
+
+@test 'gwt --stack creates worktree from current branch' {
+    create_test_repo
+    # Create a parent feature branch with unique content
+    git checkout -q -b feature/parent-branch
+    echo "parent content" > parent.txt
+    git add parent.txt
+    git commit -q -m "Parent commit"
+
+    # Stack a new worktree from current branch
+    gwt --stack test/eng-stack-1 >/dev/null 2>&1
+
+    # Check that the new branch has parent.txt (based on feature/parent-branch)
+    assert "$PARENT_DIR/test-repo-eng-stack-1/parent.txt" is_file
+    cleanup_test_repo
+}
+
+@test 'gwt -s is alias for --stack' {
+    create_test_repo
+    git checkout -q -b feature/parent-short
+    echo "short parent" > short.txt
+    git add short.txt
+    git commit -q -m "Short commit"
+
+    gwt -s test/eng-stack-2 >/dev/null 2>&1
+
+    assert "$PARENT_DIR/test-repo-eng-stack-2/short.txt" is_file
+    cleanup_test_repo
+}
+
+@test 'gwt --stack stores base branch metadata' {
+    create_test_repo
+    git checkout -q -b feature/meta-parent
+    echo "meta content" > meta.txt
+    git add meta.txt
+    git commit -q -m "Meta commit"
+
+    gwt --stack test/eng-stack-3 >/dev/null 2>&1
+
+    cd "$PARENT_DIR/test-repo-eng-stack-3"
+    local base_branch=$(_gwt_metadata_get "baseBranch")
+    assert "$base_branch" same_as "feature/meta-parent"
+    cleanup_test_repo
+}
+
+@test 'gwt --stack stores base worktree path metadata' {
+    create_test_repo
+    git checkout -q -b feature/path-parent
+    local parent_path=$(pwd)
+
+    gwt --stack test/eng-stack-4 >/dev/null 2>&1
+
+    cd "$PARENT_DIR/test-repo-eng-stack-4"
+    local base_path=$(_gwt_metadata_get "baseWorktreePath")
+    assert "$base_path" same_as "$parent_path"
+    cleanup_test_repo
+}
+
+@test 'gwt --stack adds entry to central registry' {
+    create_test_repo
+    git checkout -q -b feature/reg-parent
+
+    gwt --stack test/eng-stack-5 >/dev/null 2>&1
+
+    cd "$REPO_DIR"
+    local reg_branch=$(git config "gwt.registry.test-repo-eng-stack-5.baseBranch")
+    assert "$reg_branch" same_as "feature/reg-parent"
+    cleanup_test_repo
+}
+
+@test 'gwt --stack shows error in detached HEAD' {
+    create_test_repo
+    git checkout -q --detach HEAD
+
+    run gwt --stack test/eng-stack-detached
+
+    assert $state equals 1
+    assert "$output" contains "detached HEAD"
+    cleanup_test_repo
+}
+
+@test 'gwt --stack and --from together shows error' {
+    create_test_repo
+
+    run gwt --stack --from main test/eng-conflict
+
+    assert $state equals 1
+    assert "$output" contains "cannot"
+    cleanup_test_repo
+}
+
+# =============================================================================
+# Phase 4: --from Flag Tests
+# =============================================================================
+
+@test 'gwt --from creates worktree from specified branch' {
+    create_test_repo
+    # Create a specific branch to base from
+    git checkout -q -b feature/specific-base
+    echo "specific content" > specific.txt
+    git add specific.txt
+    git commit -q -m "Specific commit"
+    git checkout -q main
+
+    gwt --from feature/specific-base test/eng-from-1 >/dev/null 2>&1
+
+    assert "$PARENT_DIR/test-repo-eng-from-1/specific.txt" is_file
+    cleanup_test_repo
+}
+
+@test 'gwt -f is alias for --from' {
+    create_test_repo
+    git checkout -q -b feature/short-base
+    echo "short base" > short-base.txt
+    git add short-base.txt
+    git commit -q -m "Short base commit"
+    git checkout -q main
+
+    gwt -f feature/short-base test/eng-from-2 >/dev/null 2>&1
+
+    assert "$PARENT_DIR/test-repo-eng-from-2/short-base.txt" is_file
+    cleanup_test_repo
+}
+
+@test 'gwt --from stores base branch metadata' {
+    create_test_repo
+    git checkout -q -b feature/from-meta
+    git checkout -q main
+
+    gwt --from feature/from-meta test/eng-from-3 >/dev/null 2>&1
+
+    cd "$PARENT_DIR/test-repo-eng-from-3"
+    local base_branch=$(_gwt_metadata_get "baseBranch")
+    assert "$base_branch" same_as "feature/from-meta"
+    cleanup_test_repo
+}
+
+@test 'gwt --from shows error when base branch does not exist' {
+    create_test_repo
+
+    run gwt --from nonexistent/branch test/eng-from-notfound
+
+    assert $state equals 1
+    assert "$output" contains "not found"
+    cleanup_test_repo
+}
+
+@test 'gwt --from requires branch argument' {
+    create_test_repo
+
+    run gwt --from
+
+    assert $state equals 1
+    assert "$output" contains "requires"
+    cleanup_test_repo
+}
+
+@test 'gwt --from validates branch name' {
+    create_test_repo
+
+    run gwt --from "invalid;branch" test/eng-from-invalid
+
+    assert $state equals 1
+    assert "$output" contains "Invalid"
+    cleanup_test_repo
+}
+
+# =============================================================================
+# Phase 5: Navigation (--base and ..) Tests
+# =============================================================================
+
+@test 'gwt --base navigates to base worktree' {
+    create_test_repo
+    local main_path=$(pwd)
+    git checkout -q -b feature/nav-parent
+    local parent_path=$(pwd)
+
+    # Create stacked worktree
+    gwt --stack test/eng-nav-1 >/dev/null 2>&1
+    cd "$PARENT_DIR/test-repo-eng-nav-1"
+
+    # Navigate back to base
+    gwt --base
+
+    assert $(pwd) same_as "$parent_path"
+    cleanup_test_repo
+}
+
+@test 'gwt -b is alias for --base' {
+    create_test_repo
+    git checkout -q -b feature/nav-parent-short
+    local parent_path=$(pwd)
+
+    gwt --stack test/eng-nav-2 >/dev/null 2>&1
+    cd "$PARENT_DIR/test-repo-eng-nav-2"
+
+    gwt -b
+
+    assert $(pwd) same_as "$parent_path"
+    cleanup_test_repo
+}
+
+@test 'gwt .. navigates to base worktree' {
+    create_test_repo
+    git checkout -q -b feature/nav-parent-dots
+    local parent_path=$(pwd)
+
+    gwt --stack test/eng-nav-3 >/dev/null 2>&1
+    cd "$PARENT_DIR/test-repo-eng-nav-3"
+
+    gwt ..
+
+    assert $(pwd) same_as "$parent_path"
+    cleanup_test_repo
+}
+
+@test 'gwt --base shows error when no base tracked' {
+    create_test_repo
+    # This worktree was created without --stack, so no base metadata
+
+    run gwt --base
+
+    assert $state equals 1
+    assert "$output" contains "No base"
+    cleanup_test_repo
+}
+
+@test 'gwt .. shows error when no base tracked' {
+    create_test_repo
+
+    run gwt ..
+
+    assert $state equals 1
+    assert "$output" contains "No base"
+    cleanup_test_repo
+}
+
+@test 'gwt --base shows error when base worktree deleted' {
+    create_test_repo
+    git checkout -q -b feature/deleted-parent
+    local parent_path=$(pwd)
+
+    gwt --stack test/eng-nav-deleted >/dev/null 2>&1
+    cd "$PARENT_DIR/test-repo-eng-nav-deleted"
+
+    # Delete the parent worktree directory (simulating deletion)
+    # Note: We need to store a non-existent path as base
+    _gwt_metadata_set "feature/deleted-parent" "/nonexistent/path"
+
+    run gwt --base
+
+    assert $state equals 1
+    assert "$output" contains "no longer exists"
+    cleanup_test_repo
+}
+
+@test 'gwt --base works after navigating away from stacked worktree' {
+    create_test_repo
+    git checkout -q -b feature/nav-away-parent
+    local parent_path=$(pwd)
+
+    gwt --stack test/eng-nav-away >/dev/null 2>&1
+    local child_path="$PARENT_DIR/test-repo-eng-nav-away"
+    cd "$child_path"
+
+    # Navigate away to some other directory
+    cd /tmp
+
+    # Go back to child worktree
+    cd "$child_path"
+
+    # Now navigate to base
+    gwt --base
+
+    assert $(pwd) same_as "$parent_path"
+    cleanup_test_repo
+}
+
+# =============================================================================
+# Phase 6: --info Command Tests
+# =============================================================================
+
+@test 'gwt --info shows current worktree info' {
+    create_test_repo
+    local current_branch=$(git branch --show-current)
+
+    run gwt --info
+
+    assert $state equals 0
+    assert "$output" contains "$current_branch"
+    cleanup_test_repo
+}
+
+@test 'gwt -i is alias for --info' {
+    create_test_repo
+
+    run gwt -i
+
+    assert $state equals 0
+    cleanup_test_repo
+}
+
+@test 'gwt --info shows base when tracked' {
+    create_test_repo
+    git checkout -q -b feature/info-parent
+
+    gwt --stack test/eng-info-1 >/dev/null 2>&1
+    cd "$PARENT_DIR/test-repo-eng-info-1"
+
+    run gwt --info
+
+    assert $state equals 0
+    assert "$output" contains "feature/info-parent"
+    cleanup_test_repo
+}
+
+@test 'gwt --info shows not tracked when no base' {
+    create_test_repo
+
+    run gwt --info
+
+    assert $state equals 0
+    assert "$output" contains "not tracked"
+    cleanup_test_repo
+}
+
+@test 'gwt --info shows dependents list' {
+    create_test_repo
+    git checkout -q -b feature/info-parent-dep
+    local parent_path=$(pwd)
+
+    # Create two stacked worktrees with distinct names (avoiding suffix collision)
+    gwt --stack test/eng-8801-first-child >/dev/null 2>&1
+    cd "$parent_path"
+    gwt --stack test/eng-8802-second-child >/dev/null 2>&1
+    cd "$parent_path"
+
+    run gwt --info
+
+    assert $state equals 0
+    assert "$output" contains "eng-8801"
+    assert "$output" contains "eng-8802"
+    cleanup_test_repo
+}
+
+@test 'gwt --info indicates missing base worktree' {
+    create_test_repo
+    git checkout -q -b feature/info-missing
+    local parent_path=$(pwd)
+
+    gwt --stack test/eng-info-missing >/dev/null 2>&1
+    cd "$PARENT_DIR/test-repo-eng-info-missing"
+
+    # Overwrite metadata to point to non-existent path
+    _gwt_metadata_set "feature/info-missing" "/nonexistent/path"
+
+    run gwt --info
+
+    assert $state equals 0
+    assert "$output" contains "missing"
+    cleanup_test_repo
+}
+
+@test 'gwt --info shows no dependents when none exist' {
+    create_test_repo
+
+    run gwt --info
+
+    # Should show info but no dependents section or "no dependents"
+    assert $state equals 0
+    cleanup_test_repo
+}
+
+# =============================================================================
+# Phase 7: Enhanced --list Tests
+# =============================================================================
+
+@test 'gwt --list shows stack relationships with tree structure' {
+    create_test_repo
+    git checkout -q -b feature/list-parent
+    local parent_path=$(pwd)
+
+    # Create a stacked worktree
+    gwt --stack test/eng-9901-list-child >/dev/null 2>&1
+    cd "$parent_path"
+
+    run gwt --list
+
+    assert $state equals 0
+    # Should show hierarchy indicator for child worktree
+    assert "$output" contains "eng-9901"
+    assert "$output" contains "└─"
+    cleanup_test_repo
+}
+
+@test 'gwt --list shows multiple levels of hierarchy' {
+    create_test_repo
+    git checkout -q -b feature/list-level1
+    local level1_path=$(pwd)
+
+    gwt --stack test/eng-9902-level2 >/dev/null 2>&1
+    local level2_path="$PARENT_DIR/test-repo-eng-9902"
+    cd "$level2_path"
+
+    gwt --stack test/eng-9903-level3 >/dev/null 2>&1
+    cd "$level1_path"
+
+    run gwt --list
+
+    assert $state equals 0
+    # Should show nested hierarchy
+    assert "$output" contains "eng-9902"
+    assert "$output" contains "eng-9903"
+    cleanup_test_repo
+}
+
+@test 'gwt --list works with flat worktrees (no stacking)' {
+    create_test_repo
+
+    # Create worktree without stacking
+    gwt test/eng-9904-flat >/dev/null 2>&1
+    cd "$REPO_DIR"
+
+    run gwt --list
+
+    assert $state equals 0
+    # Should show flat worktree without hierarchy indicators
+    assert "$output" contains "eng-9904"
+    cleanup_test_repo
+}
+
+@test 'gwt --list handles orphaned children gracefully' {
+    create_test_repo
+    git checkout -q -b feature/orphan-parent
+    local parent_path=$(pwd)
+
+    gwt --stack test/eng-9905-orphan >/dev/null 2>&1
+    cd "$PARENT_DIR/test-repo-eng-9905"
+
+    # Manually corrupt the metadata to simulate orphaned worktree
+    _gwt_metadata_set "nonexistent/branch" "/nonexistent/path"
+    cd "$REPO_DIR"
+
+    run gwt --list
+
+    # Should still list the worktree even if parent is orphaned
+    assert $state equals 0
+    assert "$output" contains "eng-9905"
+    cleanup_test_repo
+}
+
+# =============================================================================
+# Phase 8: Dependency-Aware --prune Tests
+# =============================================================================
+
+@test '_gwt_get_dependents_count returns correct count' {
+    create_test_repo
+    git checkout -q -b feature/prune-parent-count
+    local parent_path=$(pwd)
+
+    # Create two stacked worktrees
+    gwt --stack test/eng-7701-dep1 >/dev/null 2>&1
+    cd "$parent_path"
+    gwt --stack test/eng-7702-dep2 >/dev/null 2>&1
+    cd "$parent_path"
+
+    local count=$(_gwt_get_dependents_count "feature/prune-parent-count")
+    assert "$count" same_as "2"
+    cleanup_test_repo
+}
+
+@test '_gwt_get_dependents_count returns 0 when no dependents' {
+    create_test_repo
+    git checkout -q -b feature/prune-no-deps
+
+    local count=$(_gwt_get_dependents_count "feature/prune-no-deps")
+    assert "$count" same_as "0"
+    cleanup_test_repo
+}
+
+@test '_gwt_prune_worktree cleans up registry entry' {
+    create_test_repo
+    git checkout -q -b feature/prune-registry
+    local parent_path=$(pwd)
+
+    gwt --stack test/eng-7703-cleanup >/dev/null 2>&1
+    cd "$REPO_DIR"
+
+    # Verify registry entry exists
+    local reg_before=$(git config "gwt.registry.test-repo-eng-7703.baseBranch")
+    assert "$reg_before" same_as "feature/prune-registry"
+
+    # Prune the worktree
+    _gwt_prune_worktree "$PARENT_DIR/test-repo-eng-7703"
+
+    # Registry entry should be cleaned up
+    local reg_after=$(git config "gwt.registry.test-repo-eng-7703.baseBranch" 2>/dev/null || echo "")
+    assert "$reg_after" same_as ""
+    cleanup_test_repo
+}
+
+@test '_gwt_prune_cascade removes worktree and all dependents' {
+    create_test_repo
+    git checkout -q -b feature/prune-cascade
+    local parent_path=$(pwd)
+
+    gwt --stack test/eng-7704-cascade-child >/dev/null 2>&1
+    cd "$REPO_DIR"
+
+    # Both worktrees should exist
+    assert "$PARENT_DIR/test-repo-eng-7704" is_dir
+
+    # Cascade prune (non-interactive)
+    _gwt_prune_cascade "feature/prune-cascade"
+
+    # Child worktree should be deleted (use ! -d instead of not_is_dir)
+    [[ ! -d "$PARENT_DIR/test-repo-eng-7704" ]]
+    assert $? equals 0
+    cleanup_test_repo
+}

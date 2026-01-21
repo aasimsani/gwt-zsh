@@ -153,6 +153,264 @@ _gwt_validate_dir() {
     return 0
 }
 
+# Security: Validate branch name to prevent injection attacks
+_gwt_validate_branch() {
+    local branch="$1"
+
+    # Reject empty
+    [[ -z "$branch" ]] && return 1
+
+    # Reject path traversal (..)
+    if [[ "$branch" == *".."* ]]; then
+        echo "Error: Invalid branch '$branch' - path traversal not allowed" >&2
+        return 1
+    fi
+
+    # Reject shell metacharacters and quotes (security)
+    # Only allow: alphanumeric, dash, underscore, dot, forward slash
+    if [[ ! "$branch" =~ ^[a-zA-Z0-9_./-]+$ ]]; then
+        echo "Error: Invalid branch '$branch' - special characters not allowed" >&2
+        return 1
+    fi
+
+    return 0
+}
+
+# Get the configured main branch name (default: "main")
+_gwt_get_main_branch() {
+    if [[ -n "$GWT_MAIN_BRANCH" ]]; then
+        echo "$GWT_MAIN_BRANCH"
+    else
+        echo "main"
+    fi
+}
+
+# Read GWT_MAIN_BRANCH from zshrc file
+_gwt_config_read_main() {
+    local zshrc="${1:-$HOME/.zshrc}"
+    if [[ -f "$zshrc" ]]; then
+        grep -E '^export GWT_MAIN_BRANCH=' "$zshrc" 2>/dev/null | sed 's/^export GWT_MAIN_BRANCH="//' | sed 's/"$//'
+    fi
+}
+
+# =============================================================================
+# Worktree Metadata Functions (for base branch tracking)
+# =============================================================================
+
+# Store base branch metadata for a worktree
+# Usage: _gwt_metadata_set <base_branch> <base_worktree_path>
+# Must be called from within the worktree directory
+_gwt_metadata_set() {
+    local base_branch="$1"
+    local base_path="$2"
+
+    # Enable worktree-specific config
+    git config extensions.worktreeConfig true 2>/dev/null
+
+    # Store metadata in worktree-local config
+    git config --worktree gwt.baseBranch "$base_branch"
+    git config --worktree gwt.baseWorktreePath "$base_path"
+}
+
+# Get metadata value for the current worktree
+# Usage: _gwt_metadata_get <key>  (key: baseBranch or baseWorktreePath)
+_gwt_metadata_get() {
+    local key="$1"
+    git config --worktree "gwt.$key" 2>/dev/null
+}
+
+# Clear all gwt metadata from the current worktree
+_gwt_metadata_clear() {
+    git config --worktree --unset gwt.baseBranch 2>/dev/null
+    git config --worktree --unset gwt.baseWorktreePath 2>/dev/null
+}
+
+# =============================================================================
+# Worktree Registry Functions (for querying dependents)
+# =============================================================================
+
+# Add a worktree to the central registry
+# Usage: _gwt_registry_add <worktree_name> <base_branch> <base_path>
+# Must be called from the main repo directory
+_gwt_registry_add() {
+    local wt_name="$1"
+    local base_branch="$2"
+    local base_path="$3"
+
+    git config "gwt.registry.$wt_name.baseBranch" "$base_branch"
+    git config "gwt.registry.$wt_name.basePath" "$base_path"
+}
+
+# Remove a worktree from the central registry
+# Usage: _gwt_registry_remove <worktree_name>
+_gwt_registry_remove() {
+    local wt_name="$1"
+
+    git config --unset "gwt.registry.$wt_name.baseBranch" 2>/dev/null
+    git config --unset "gwt.registry.$wt_name.basePath" 2>/dev/null
+}
+
+# Get all worktrees that depend on a given branch
+# Usage: _gwt_registry_get_dependents <branch_name>
+# Returns: newline-separated list of worktree names
+_gwt_registry_get_dependents() {
+    local branch="$1"
+    local result=""
+
+    # Get all registry entries and filter by base branch
+    # Note: git config normalizes keys to lowercase, so baseBranch becomes basebranch
+    git config --get-regexp '^gwt\.registry\..*\.basebranch$' 2>/dev/null | while read -r key value; do
+        if [[ "$value" == "$branch" ]]; then
+            # Extract worktree name from key: gwt.registry.<name>.basebranch
+            local wt_name=$(echo "$key" | sed 's/^gwt\.registry\.//' | sed 's/\.basebranch$//')
+            echo "$wt_name"
+        fi
+    done
+}
+
+# =============================================================================
+# Worktree Navigation Functions
+# =============================================================================
+
+# Navigate to the base worktree of the current worktree
+# Returns: 0 on success, 1 on error
+_gwt_navigate_base() {
+    # Get base worktree path from metadata
+    local base_path=$(_gwt_metadata_get "baseWorktreePath")
+
+    if [[ -z "$base_path" ]]; then
+        print -P "%F{red}Error: No base worktree tracked for this worktree%f" >&2
+        print -P "%F{240}This worktree was not created with --stack or --from%f" >&2
+        return 1
+    fi
+
+    # Check if base worktree still exists
+    if [[ ! -d "$base_path" ]]; then
+        local base_branch=$(_gwt_metadata_get "baseBranch")
+        print -P "%F{red}Error: Base worktree no longer exists%f" >&2
+        print -P "%F{240}Base branch: $base_branch%f" >&2
+        print -P "%F{240}Expected path: $base_path%f" >&2
+        return 1
+    fi
+
+    # Navigate to base worktree
+    cd "$base_path"
+    return 0
+}
+
+# Show information about the current worktree's stack relationships
+_gwt_show_info() {
+    local current_branch=$(git branch --show-current 2>/dev/null)
+    local worktree_path=$(pwd)
+
+    echo ""
+    print -P "%B%F{cyan}Worktree Info%f%b"
+    echo ""
+
+    # Current branch
+    print -P "  %F{green}●%f Branch: %B$current_branch%b"
+    print -P "  %F{240}  Path: $worktree_path%f"
+    echo ""
+
+    # Base worktree info
+    local base_branch=$(_gwt_metadata_get "baseBranch")
+    local base_path=$(_gwt_metadata_get "baseWorktreePath")
+
+    if [[ -n "$base_branch" ]]; then
+        print -P "%B%F{cyan}Base Worktree%f%b"
+        echo ""
+        if [[ -d "$base_path" ]]; then
+            print -P "  %F{green}●%f Branch: %B$base_branch%b"
+            print -P "  %F{240}  Path: $base_path%f"
+        else
+            print -P "  %F{red}○%f Branch: %B$base_branch%b %F{red}(missing)%f"
+            print -P "  %F{240}  Path: $base_path (not found)%f"
+        fi
+        echo ""
+    else
+        print -P "%F{240}  Base: not tracked (worktree was not created with --stack or --from)%f"
+        echo ""
+    fi
+
+    # Dependents (worktrees that have this as their base)
+    local dependents=$(_gwt_registry_get_dependents "$current_branch")
+    if [[ -n "$dependents" ]]; then
+        print -P "%B%F{cyan}Dependents%f%b (worktrees based on this branch)"
+        echo ""
+        echo "$dependents" | while read -r dep; do
+            if [[ -n "$dep" ]]; then
+                print -P "  %F{blue}├─%f $dep"
+            fi
+        done
+        echo ""
+    fi
+
+    return 0
+}
+
+# =============================================================================
+# Dependency-Aware Prune Functions
+# =============================================================================
+
+# Get count of worktrees that depend on a given branch
+# Usage: _gwt_get_dependents_count <branch_name>
+# Returns: count as string (can be used in arithmetic)
+_gwt_get_dependents_count() {
+    local branch="$1"
+    local count=0
+
+    local dependents=$(_gwt_registry_get_dependents "$branch")
+    if [[ -n "$dependents" ]]; then
+        count=$(echo "$dependents" | wc -l | tr -d ' ')
+    fi
+
+    echo "$count"
+}
+
+# Prune a single worktree and clean up its registry entry
+# Usage: _gwt_prune_worktree <worktree_path>
+_gwt_prune_worktree() {
+    local wt_path="$1"
+    local wt_name=$(basename "$wt_path")
+
+    # Remove from git worktree
+    git worktree remove --force "$wt_path" 2>/dev/null
+
+    # Clean up registry entry
+    _gwt_registry_remove "$wt_name"
+
+    return 0
+}
+
+# Cascade delete: remove a branch's dependents recursively
+# Usage: _gwt_prune_cascade <branch_name>
+_gwt_prune_cascade() {
+    local branch="$1"
+    local repo_root=$(git rev-parse --show-toplevel)
+    local repo_parent=$(dirname "$repo_root")
+
+    local dependents=$(_gwt_registry_get_dependents "$branch")
+    if [[ -n "$dependents" ]]; then
+        echo "$dependents" | while read -r dep_name; do
+            if [[ -n "$dep_name" ]]; then
+                local dep_path="$repo_parent/$dep_name"
+                if [[ -d "$dep_path" ]]; then
+                    # Get the branch of this dependent for recursive cascade
+                    local dep_branch=$(cd "$dep_path" 2>/dev/null && git branch --show-current 2>/dev/null)
+
+                    # First, recursively cascade this dependent's dependents
+                    if [[ -n "$dep_branch" ]]; then
+                        _gwt_prune_cascade "$dep_branch"
+                    fi
+
+                    # Then remove this dependent
+                    _gwt_prune_worktree "$dep_path"
+                fi
+            fi
+        done
+    fi
+}
+
 # Read GWT_COPY_DIRS from zshrc file
 _gwt_config_read() {
     local zshrc="${1:-$HOME/.zshrc}"
@@ -569,7 +827,13 @@ gwt - Git Worktree helper for Linear tickets and regular branches
 Usage: gwt [options] <branch-name>
        gwt --config | --list | --prune | --update | --version
 
-Options:
+Stacking Options:
+  -s, --stack               Create worktree from current branch (stack)
+  -f, --from <base-branch>  Create worktree from specified base branch
+  -b, --base                Navigate to base worktree (if tracked)
+  -i, --info                Show stack information for current worktree
+
+Other Options:
   --config                  Configure default directories to copy (interactive)
   --copy-config-dirs <dir>  Copy directory from repo root to worktree (repeatable)
   --list                    List worktrees for this repo
@@ -581,11 +845,14 @@ Options:
 
 Environment Variables:
   GWT_COPY_DIRS             Comma-separated list of directories to always copy
+  GWT_MAIN_BRANCH           Default base branch for new worktrees (default: main)
   GWT_NO_FZF                Set to 1 to disable fzf menus (use numbered fallback)
 
 Examples:
-  gwt aasim/eng-1045-feature     Create worktree ../repo-eng-1045
-  gwt feature/add-new-thing      Create worktree ../repo-add-new-thing
+  gwt aasim/eng-1045-feature     Create worktree ../repo-eng-1045 (from main)
+  gwt --stack feature/child      Create worktree from current branch
+  gwt --from develop feature/x   Create worktree from develop branch
+  gwt --base                     Navigate back to base worktree
   gwt --copy-config-dirs .vscode feature/branch
   gwt --config                   Configure directories interactively
   gwt --prune                    Remove old worktrees interactively
@@ -612,22 +879,48 @@ HELP
             fi
             local repo_root=$(git rev-parse --show-toplevel)
             local found=false
-            local wt_path wt_branch
+            local wt_path wt_branch wt_base
+            local -a worktrees=()
+            local -A wt_bases=()
+            local -A wt_branches=()
+
             echo ""
+
+            # First pass: collect all worktrees and their metadata
             while IFS= read -r line; do
                 if [[ "$line" == worktree* ]]; then
                     wt_path="${line#worktree }"
                     if [[ "$wt_path" != "$repo_root" ]]; then
-                        found=true
+                        worktrees+=("$wt_path")
                         if [[ -d "$wt_path" ]]; then
                             wt_branch=$(cd "$wt_path" 2>/dev/null && git branch --show-current 2>/dev/null || echo "detached")
-                            print -P "  %F{green}●%f $wt_path %F{240}($wt_branch)%f"
-                        else
-                            print -P "  %F{red}○%f $wt_path %F{240}(missing)%f"
+                            wt_base=$(cd "$wt_path" 2>/dev/null && _gwt_metadata_get "baseBranch" 2>/dev/null)
+                            wt_branches[$wt_path]="$wt_branch"
+                            wt_bases[$wt_path]="$wt_base"
                         fi
                     fi
                 fi
             done < <(git worktree list --porcelain)
+
+            # Second pass: display with hierarchy
+            for wt_path in "${worktrees[@]}"; do
+                found=true
+                wt_branch="${wt_branches[$wt_path]}"
+                wt_base="${wt_bases[$wt_path]}"
+
+                if [[ -d "$wt_path" ]]; then
+                    if [[ -n "$wt_base" ]]; then
+                        # This is a stacked worktree - show with tree indicator
+                        print -P "  %F{blue}└─%f %F{green}●%f $wt_path %F{240}($wt_branch)%f"
+                    else
+                        # Regular worktree - show normally
+                        print -P "  %F{green}●%f $wt_path %F{240}($wt_branch)%f"
+                    fi
+                else
+                    print -P "  %F{red}○%f $wt_path %F{240}(missing)%f"
+                fi
+            done
+
             if [[ "$found" == false ]]; then
                 print -P "  %F{240}No worktrees found%f"
             fi
@@ -659,9 +952,29 @@ HELP
     # Parse options
     local -a copy_dirs=()
     local branch_name=""
+    local stack_from_current=false
+    local explicit_base=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            --stack|-s)
+                stack_from_current=true
+                shift
+                ;;
+            --from|-f)
+                if [[ -n "$2" && "$2" != --* ]]; then
+                    # Security: Validate branch name
+                    if ! _gwt_validate_branch "$2"; then
+                        echo "Error: Invalid branch name '$2'" >&2
+                        return 1
+                    fi
+                    explicit_base="$2"
+                    shift 2
+                else
+                    echo "Error: --from requires a branch argument" >&2
+                    return 1
+                fi
+                ;;
             --copy-config-dirs)
                 if [[ -n "$2" && "$2" != --* ]]; then
                     # Security: Validate directory name
@@ -675,9 +988,24 @@ HELP
                     return 1
                 fi
                 ;;
+            --base|-b)
+                # Navigate to base worktree
+                _gwt_navigate_base
+                return $?
+                ;;
+            --info|-i)
+                # Show stack information
+                _gwt_show_info
+                return $?
+                ;;
             --*)
                 echo "Error: Unknown option $1" >&2
                 return 1
+                ;;
+            ..)
+                # Special case: navigate to base worktree
+                _gwt_navigate_base
+                return $?
                 ;;
             *)
                 branch_name="$1"
@@ -686,6 +1014,21 @@ HELP
                 ;;
         esac
     done
+
+    # Validate mutually exclusive options
+    if [[ "$stack_from_current" == true && -n "$explicit_base" ]]; then
+        echo "Error: --stack and --from cannot be used together" >&2
+        return 1
+    fi
+
+    # Validate --stack is not used in detached HEAD
+    if [[ "$stack_from_current" == true ]]; then
+        local current_head=$(git symbolic-ref --short HEAD 2>/dev/null)
+        if [[ -z "$current_head" ]]; then
+            echo "Error: Cannot use --stack in detached HEAD state" >&2
+            return 1
+        fi
+    fi
 
     # Add dirs from GWT_COPY_DIRS env var (with validation)
     if [[ -n "$GWT_COPY_DIRS" ]]; then
@@ -761,6 +1104,27 @@ HELP
     # Create worktree - handle existing vs new branch
     local worktree_created=false
     local git_error=""
+    local base_branch=""
+    local base_worktree_path=""
+    local current_worktree_path=$(pwd)
+
+    # Determine base branch for new branches
+    if [[ -n "$explicit_base" ]]; then
+        # --from flag: verify base branch exists
+        if ! git rev-parse --verify "$explicit_base" >/dev/null 2>&1 && \
+           ! git rev-parse --verify "origin/$explicit_base" >/dev/null 2>&1; then
+            echo "Error: Base branch '$explicit_base' not found" >&2
+            return 1
+        fi
+        base_branch="$explicit_base"
+        # Find worktree path for this branch if it exists
+        base_worktree_path=$(git worktree list --porcelain | grep -A1 "^worktree " | grep -B1 "branch refs/heads/$explicit_base$" | head -1 | sed 's/worktree //')
+        [[ -z "$base_worktree_path" ]] && base_worktree_path="$repo_root"
+    elif [[ "$stack_from_current" == true ]]; then
+        # --stack flag: use current branch
+        base_branch=$(git branch --show-current)
+        base_worktree_path="$current_worktree_path"
+    fi
 
     # Try 1: Branch exists locally
     if git rev-parse --verify "$branch_name" >/dev/null 2>&1; then
@@ -768,15 +1132,42 @@ HELP
     # Try 2: Branch exists on origin
     elif git rev-parse --verify "origin/$branch_name" >/dev/null 2>&1; then
         git_error=$(git worktree add "$worktree_path" "$branch_name" 2>&1) && worktree_created=true
-    # Try 3: New branch - create from HEAD
+    # Try 3: New branch - determine base ref
     else
-        git_error=$(git worktree add -b "$branch_name" "$worktree_path" HEAD 2>&1) && worktree_created=true
+        local base_ref=""
+        if [[ -n "$base_branch" ]]; then
+            # Use explicit base or current branch (--stack/--from)
+            base_ref="$base_branch"
+        else
+            # Default: use main branch
+            local main_branch=$(_gwt_get_main_branch)
+            if git rev-parse --verify "$main_branch" >/dev/null 2>&1; then
+                base_ref="$main_branch"
+            elif git rev-parse --verify "origin/$main_branch" >/dev/null 2>&1; then
+                base_ref="origin/$main_branch"
+            else
+                # Fall back to HEAD if main doesn't exist
+                base_ref="HEAD"
+            fi
+        fi
+        git_error=$(git worktree add -b "$branch_name" "$worktree_path" "$base_ref" 2>&1) && worktree_created=true
     fi
 
     if $worktree_created; then
         # Copy configured directories
         if [[ ${#copy_dirs[@]} -gt 0 ]]; then
             _gwt_copy_dirs "$repo_root" "$worktree_path" "${copy_dirs[@]}"
+        fi
+
+        # Store metadata if we have a base branch (--stack or --from was used)
+        if [[ -n "$base_branch" ]]; then
+            # Store in the new worktree's config
+            cd "$worktree_path"
+            _gwt_metadata_set "$base_branch" "$base_worktree_path"
+
+            # Add to central registry (from repo root)
+            cd "$repo_root"
+            _gwt_registry_add "$repo_name-$worktree_suffix" "$base_branch" "$base_worktree_path"
         fi
 
         echo ""

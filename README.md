@@ -7,19 +7,29 @@ Stop typing `git worktree add ../myrepo-feature ../myrepo-feature feature/branch
 ## Features
 
 - **Smart Worktree Creation** - Auto-names worktrees from branch names and cd's into them
-- **Interactive Pruning** - Clean up old worktrees with fzf multi-select
-- **List Worktrees** - See all worktrees at a glance with status indicators
+- **Worktree Stacking** - Create worktrees from current branch and navigate back to parent
+- **Interactive Pruning** - Clean up old worktrees with fzf multi-select (dependency-aware)
+- **List Worktrees** - See all worktrees at a glance with hierarchy indicators
 - **Copy Config Dirs** - Automatically copy `.vscode/`, `.env`, etc. to new worktrees
 - **fzf Integration** - Fuzzy-searchable menus (with fallback for non-fzf setups)
 
 ## Quick Start
 
 ```bash
-# Create worktree (auto-names from branch)
+# Create worktree from main branch (default)
 gwt feature/add-user-auth          # Creates ../myrepo-add-user-auth
 
-# List all worktrees
+# Create stacked worktree from current branch
+gwt --stack feature/child-branch   # Branches from current, tracks parent
+
+# Navigate back to parent worktree
+gwt --base                         # or: gwt ..
+
+# List all worktrees with hierarchy
 gwt --list
+
+# Show stack info for current worktree
+gwt --info
 
 # Prune old worktrees interactively
 gwt --prune
@@ -92,6 +102,19 @@ To disable fzf and use numbered menus instead:
 export GWT_NO_FZF=1
 ```
 
+### Environment Variables
+
+```bash
+# Default base branch for new worktrees (default: "main")
+export GWT_MAIN_BRANCH="main"
+
+# Directories to copy to new worktrees
+export GWT_COPY_DIRS=".vscode,.env"
+
+# Disable fzf menus
+export GWT_NO_FZF=1
+```
+
 ## Uninstallation
 
 ### Oh-My-Zsh
@@ -135,23 +158,58 @@ git worktree prune   # Clean up stale references
 
 ### Creating Worktrees
 ```bash
+# Create from main branch (default behavior)
 gwt your-name/eng-1234-feature-description
 gwt feature/add-new-dashboard
+
+# Stack: create from current branch
+gwt --stack feature/child-feature    # or: gwt -s feature/child-feature
+
+# Explicit base: create from specific branch
+gwt --from develop feature/new       # or: gwt -f develop feature/new
+```
+
+### Worktree Stacking
+
+When you use `--stack` or `--from`, gwt tracks the parent-child relationship:
+
+```bash
+# Start on main
+gwt feature/parent           # Creates worktree from main
+
+# Create child from parent
+gwt --stack feature/child    # Branches from feature/parent
+
+# Navigate back to parent
+gwt --base                   # or: gwt ..
+
+# See stack info
+gwt --info                   # Shows base branch and dependents
 ```
 
 ### Listing Worktrees
 ```bash
 gwt --list
 ```
-Shows all worktrees with status:
+Shows all worktrees with status and hierarchy:
 - `●` exists
 - `○` missing (stale reference)
+- `└─` indicates a stacked worktree
+
+### Worktree Info
+```bash
+gwt --info       # or: gwt -i
+```
+Shows current worktree's stack relationships:
+- Current branch and path
+- Base worktree (if stacked)
+- Dependent worktrees (children)
 
 ### Pruning Worktrees
 ```bash
 gwt --prune
 ```
-Interactive multi-select to remove old worktrees. Shows uncommitted changes warnings before deletion.
+Interactive multi-select to remove old worktrees. Shows uncommitted changes warnings and dependency counts before deletion.
 
 ### Copy Config Directories
 
