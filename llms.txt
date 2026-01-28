@@ -1,0 +1,62 @@
+# gwt-zsh
+
+> Stupidly simple git worktree management for Zsh.
+
+gwt-zsh is a Zsh plugin that wraps `git worktree` with smart automatic naming, worktree stacking (parent-child chains), navigation between worktrees, interactive pruning, and config directory copying. Single-file plugin with no dependencies beyond git. Optional fzf integration for interactive menus.
+
+## Documentation
+
+- [README](https://github.com/aasimsani/gwt-zsh/blob/main/README.md): Full usage guide, installation, examples
+- [AGENTS.md](https://github.com/aasimsani/gwt-zsh/blob/main/AGENTS.md): Architecture, function reference, development guide
+- [CLAUDE.md](https://github.com/aasimsani/gwt-zsh/blob/main/CLAUDE.md): Development conventions and guidelines
+
+## Quick Reference
+
+### Commands
+
+- `gwt <branch>`: Create worktree from main branch, cd into it
+- `gwt --stack <branch>` / `gwt -s`: Create worktree branched from current branch (tracks parent)
+- `gwt --from <base> <branch>` / `gwt -f`: Create worktree from a specific base branch
+- `gwt --base` / `gwt ..`: Navigate to parent worktree
+- `gwt --root` / `gwt ...`: Navigate to main worktree
+- `gwt --info` / `gwt -i`: Show stack info for current worktree
+- `gwt --list`: List all worktrees with hierarchy
+- `gwt --prune`: Interactive multi-select worktree cleanup
+- `gwt --config`: Configure directories to auto-copy to new worktrees
+- `gwt --version`: Show version
+- `gwt --update`: Self-update
+- `gwt --help` / `gwt -h`: Show help
+
+### Naming
+
+- Linear branches (`*/eng-XXXX-*`): `../repo-eng-1045`
+- Regular branches: first 3 words → `../repo-add-new-dashboard`
+
+### Installation
+
+```bash
+git clone https://github.com/aasimsani/gwt-zsh ~/.oh-my-zsh/custom/plugins/gwt
+omz plugin enable gwt
+```
+
+Also works with: Antigen, Zplug, Zinit, Zgenom.
+
+### Environment Variables
+
+- `GWT_MAIN_BRANCH`: Default base branch (default: "main")
+- `GWT_COPY_DIRS`: Comma-separated directories to copy to new worktrees
+- `GWT_NO_FZF`: Set to 1 to disable fzf menus
+
+## Architecture
+
+Single-file plugin: `gwt.plugin.zsh` (~1250 lines of Zsh).
+
+Metadata is stored in two places:
+1. Worktree-local git config (`.git/config.worktree`): tracks parent branch/path for child→parent navigation
+2. Global git config (`.git/config`): registry of children for parent→children queries
+
+Navigation: `gwt ..` reads worktree-local config. `gwt ...` uses `git rev-parse --git-common-dir`.
+
+## Development
+
+Test framework: zunit. Coverage threshold: 95%. Run tests: `zunit`. Release: `./scripts/release.zsh <version>`.
