@@ -11,6 +11,7 @@
 #   --list                    List worktrees for this repo
 #   --list-copy-dirs          List configured directories to copy
 #   --prune                   Interactive worktree pruning
+#   --setup-skill             Install Claude Code skill globally
 #   --update                  Update gwt to the latest version
 #   --version                 Show version information
 #
@@ -55,6 +56,34 @@ _gwt_print() {
     else
         print -P "  ${color_code}${msg}%f"
     fi
+}
+
+# Install Claude Code skill for gwt
+_gwt_setup_skill() {
+    local skill_source="$GWT_INSTALL_DIR/skills/gwt.md"
+    local skill_dir="$HOME/.claude/skills/gwt"
+    local skill_dest="$skill_dir/SKILL.md"
+
+    if [[ ! -f "$skill_source" ]]; then
+        print -P "%F{red}Error:%f Could not find skill source at $skill_source"
+        return 1
+    fi
+
+    local is_update=false
+    if [[ -f "$skill_dest" ]]; then
+        is_update=true
+    fi
+
+    mkdir -p "$skill_dir"
+    cp "$skill_source" "$skill_dest"
+
+    if $is_update; then
+        print -P "%F{green}✓%f Skill updated at $skill_dest"
+    else
+        print -P "%F{green}✓%f Skill installed at $skill_dest"
+    fi
+    echo ""
+    echo "Usage: Type /gwt in Claude Code to load gwt command reference."
 }
 
 # Update gwt to the latest version
@@ -890,6 +919,7 @@ Worktree Management:
   --list-copy-dirs          List configured directories to copy
 
 Other Options:
+  --setup-skill, --setup-ai Install Claude Code skill globally (~/.claude/skills/)
   --update                  Update gwt to the latest version
   --version                 Show version information
   --help, -h                Show this help message
@@ -926,6 +956,10 @@ HELP
         --version)
             echo "gwt version $GWT_VERSION"
             return 0
+            ;;
+        --setup-skill|--setup-ai)
+            _gwt_setup_skill
+            return $?
             ;;
         --list)
             if ! git rev-parse --git-dir > /dev/null 2>&1; then

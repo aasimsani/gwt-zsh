@@ -2217,3 +2217,108 @@ echo "$@" >> '"$git_log"'
     assert $? equals 0
     cleanup_test_repo
 }
+
+# =============================================================================
+# Setup Skill Tests (--setup-skill / --setup-ai)
+# =============================================================================
+
+@test 'gwt --setup-skill creates skill directory' {
+    local test_home=$(mktemp -d)
+
+    HOME="$test_home" run gwt --setup-skill
+
+    assert "$test_home/.claude/skills/gwt" is_dir
+    _safe_rm_rf "$test_home"
+}
+
+@test 'gwt --setup-skill copies SKILL.md file' {
+    local test_home=$(mktemp -d)
+
+    HOME="$test_home" run gwt --setup-skill
+
+    assert "$test_home/.claude/skills/gwt/SKILL.md" is_file
+    _safe_rm_rf "$test_home"
+}
+
+@test 'gwt --setup-skill file contains skill frontmatter' {
+    local test_home=$(mktemp -d)
+
+    HOME="$test_home" gwt --setup-skill >/dev/null 2>&1
+    local content=$(cat "$test_home/.claude/skills/gwt/SKILL.md")
+
+    assert "$content" contains "name: gwt"
+    _safe_rm_rf "$test_home"
+}
+
+@test 'gwt --setup-skill shows success message' {
+    local test_home=$(mktemp -d)
+
+    HOME="$test_home" run gwt --setup-skill
+
+    assert $state equals 0
+    assert "$output" contains "Skill installed"
+    _safe_rm_rf "$test_home"
+}
+
+@test 'gwt --setup-skill shows usage hint' {
+    local test_home=$(mktemp -d)
+
+    HOME="$test_home" run gwt --setup-skill
+
+    assert "$output" contains "/gwt"
+    _safe_rm_rf "$test_home"
+}
+
+@test 'gwt --setup-ai is alias for --setup-skill' {
+    local test_home=$(mktemp -d)
+
+    HOME="$test_home" run gwt --setup-ai
+
+    assert $state equals 0
+    assert "$test_home/.claude/skills/gwt/SKILL.md" is_file
+    _safe_rm_rf "$test_home"
+}
+
+@test 'gwt --setup-skill overwrites existing skill' {
+    local test_home=$(mktemp -d)
+    mkdir -p "$test_home/.claude/skills/gwt"
+    echo "old content" > "$test_home/.claude/skills/gwt/SKILL.md"
+
+    HOME="$test_home" run gwt --setup-skill
+
+    assert $state equals 0
+    local content=$(cat "$test_home/.claude/skills/gwt/SKILL.md")
+    assert "$content" contains "name: gwt"
+    assert "$content" does_not_contain "old content"
+    _safe_rm_rf "$test_home"
+}
+
+@test 'gwt --setup-skill shows updated message when overwriting' {
+    local test_home=$(mktemp -d)
+    mkdir -p "$test_home/.claude/skills/gwt"
+    echo "old content" > "$test_home/.claude/skills/gwt/SKILL.md"
+
+    HOME="$test_home" run gwt --setup-skill
+
+    assert "$output" contains "updated"
+    _safe_rm_rf "$test_home"
+}
+
+@test 'gwt --setup-skill works outside git repo' {
+    local test_home=$(mktemp -d)
+    local test_dir=$(mktemp -d)
+    mkdir -p "$test_dir/not-a-repo"
+    cd "$test_dir/not-a-repo"
+
+    HOME="$test_home" run gwt --setup-skill
+
+    assert $state equals 0
+    _safe_rm_rf "$test_home"
+    _safe_rm_rf "$test_dir"
+}
+
+@test 'gwt --help mentions --setup-skill' {
+    run gwt --help
+
+    assert "$output" contains "setup-skill"
+}

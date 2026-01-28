@@ -352,6 +352,18 @@ gwt feature/new-feature
 # .vscode/ and .idea/ are automatically copied
 ```
 
+### AI Assistant Integration
+
+Set up gwt as a skill in [Claude Code](https://claude.com/claude-code) so it knows all gwt commands:
+
+```bash
+gwt --setup-skill    # Installs to ~/.claude/skills/gwt/SKILL.md
+```
+
+Then type `/gwt` in any Claude Code session to load the full command reference. Claude will also auto-invoke the skill when you ask about git worktrees.
+
+The `--setup-ai` flag is an alias for `--setup-skill`.
+
 ### Other Commands
 
 ```bash
@@ -375,6 +387,7 @@ gwt --help       # Show help
 | `gwt --config` | | Configure copy directories |
 | `gwt --copy-config-dirs <dir>` | | Copy directory when creating worktree |
 | `gwt --list-copy-dirs` | | List configured directories |
+| `gwt --setup-skill` | `gwt --setup-ai` | Install Claude Code skill globally |
 | `gwt --version` | | Show version |
 | `gwt --update` | | Update to latest |
 | `gwt --help` | `gwt -h` | Show help |
