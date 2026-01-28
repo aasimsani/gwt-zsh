@@ -298,6 +298,38 @@ _gwt_navigate_base() {
     return 0
 }
 
+# Navigate to the main worktree (ultimate root) of this repository
+# Uses git rev-parse --git-common-dir to find the shared .git directory
+# Returns: 0 on success, 1 on error
+_gwt_navigate_root() {
+    local git_common_dir=$(git rev-parse --git-common-dir 2>/dev/null)
+
+    if [[ -z "$git_common_dir" ]]; then
+        print -P "%F{red}Error: Not in a git repository%f" >&2
+        return 1
+    fi
+
+    # If git-common-dir returns relative ".git", we're already in main worktree
+    if [[ "$git_common_dir" == ".git" ]]; then
+        print -P "%F{240}Already in main worktree%f"
+        return 0
+    fi
+
+    # Get parent directory of .git (the main worktree path)
+    local main_worktree="${git_common_dir:h}"
+
+    # Verify the main worktree exists
+    if [[ ! -d "$main_worktree" ]]; then
+        print -P "%F{red}Error: Main worktree no longer exists%f" >&2
+        print -P "%F{240}Expected path: $main_worktree%f" >&2
+        return 1
+    fi
+
+    # Navigate to main worktree
+    cd "$main_worktree"
+    return 0
+}
+
 # Show information about the current worktree's stack relationships
 _gwt_show_info() {
     local current_branch=$(git branch --show-current 2>/dev/null)
@@ -312,12 +344,22 @@ _gwt_show_info() {
     print -P "  %F{240}  Path: $worktree_path%f"
     echo ""
 
-    # Base worktree info
+    # Main worktree info (ultimate root)
+    local git_common_dir=$(git rev-parse --git-common-dir 2>/dev/null)
+    if [[ -n "$git_common_dir" && "$git_common_dir" != ".git" ]]; then
+        local main_worktree="${git_common_dir:h}"
+        print -P "%B%F{cyan}Main Worktree%f%b (use %Bgwt ...%b or %Bgwt --root%b to navigate)"
+        echo ""
+        print -P "  %F{green}●%f Path: %B$main_worktree%b"
+        echo ""
+    fi
+
+    # Base worktree info (immediate parent)
     local base_branch=$(_gwt_metadata_get "baseBranch")
     local base_path=$(_gwt_metadata_get "baseWorktreePath")
 
     if [[ -n "$base_branch" ]]; then
-        print -P "%B%F{cyan}Base Worktree%f%b"
+        print -P "%B%F{cyan}Base Worktree%f%b (use %Bgwt ..%b or %Bgwt --base%b to navigate)"
         echo ""
         if [[ -d "$base_path" ]]; then
             print -P "  %F{green}●%f Branch: %B$base_branch%b"
@@ -829,12 +871,15 @@ Usage: gwt [options] <branch-name>
        gwt --stack <branch-name>      Create worktree from current branch
        gwt --from <base> <branch>     Create worktree from specified branch
        gwt --base | gwt ..            Navigate to parent worktree
+       gwt --root | gwt ...           Navigate to main worktree (ultimate root)
 
 Stacking Options:
   -s, --stack               Create worktree from current branch (tracks parent)
   -f, --from <base-branch>  Create worktree from specified base branch
   -b, --base                Navigate to base/parent worktree
   ..                        Shorthand for --base (navigate to parent)
+  -r, --root                Navigate to main worktree (ultimate root)
+  ...                       Shorthand for --root (navigate to root)
   -i, --info                Show stack info (base branch, dependents)
 
 Worktree Management:
@@ -860,6 +905,8 @@ Examples:
   gwt --from develop feature/x   Create worktree from develop branch
   gwt ..                         Navigate back to parent worktree
   gwt --base                     Same as above (navigate to parent)
+  gwt ...                        Navigate to main worktree (ultimate root)
+  gwt --root                     Same as above (navigate to root)
   gwt --info                     Show current worktree's stack relationships
   gwt --list                     List all worktrees (shows hierarchy)
   gwt --prune                    Remove old worktrees (warns about dependents)
@@ -1001,6 +1048,11 @@ HELP
                 _gwt_navigate_base
                 return $?
                 ;;
+            --root|-r)
+                # Navigate to main worktree (ultimate root)
+                _gwt_navigate_root
+                return $?
+                ;;
             --info|-i)
                 # Show stack information
                 _gwt_show_info
@@ -1013,6 +1065,11 @@ HELP
             ..)
                 # Special case: navigate to base worktree
                 _gwt_navigate_base
+                return $?
+                ;;
+            ...)
+                # Special case: navigate to main worktree (ultimate root)
+                _gwt_navigate_root
                 return $?
                 ;;
             *)

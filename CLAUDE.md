@@ -71,3 +71,32 @@ Use ZSH's `print -P` with format codes:
 - `%B` / `%b` - Bold
 - `%F{240}` - Dim gray
 - Symbols: `●` (exists), `○` (missing), `✓` (success), `❯` (prompt)
+
+## Architecture
+
+### Navigation System
+
+gwt provides two navigation mechanisms for worktree chains:
+
+| Command | Function | How it works |
+|---------|----------|--------------|
+| `gwt ..` / `gwt --base` | `_gwt_navigate_base()` | Reads `gwt.baseWorktreePath` from worktree-local git config |
+| `gwt ...` / `gwt --root` | `_gwt_navigate_root()` | Uses `git rev-parse --git-common-dir` to find main worktree |
+
+**Base navigation** relies on metadata stored when worktrees are created with `--stack` or `--from`. If a worktree wasn't created with these flags, `gwt ..` will fail.
+
+**Root navigation** uses git's native tracking - `git rev-parse --git-common-dir` always returns the path to the shared `.git` directory, and its parent is the main worktree. This works from any linked worktree, regardless of how it was created.
+
+### Metadata Storage
+
+Two complementary tracking systems:
+
+1. **Worktree-local metadata** (for child → parent navigation):
+   - Stored in `.git/config.worktree` via `git config --worktree`
+   - Keys: `gwt.baseBranch`, `gwt.baseWorktreePath`
+   - Set by `_gwt_metadata_set()`, read by `_gwt_metadata_get()`
+
+2. **Global registry** (for parent → children queries):
+   - Stored in `.git/config` via `git config`
+   - Pattern: `gwt.registry.<worktree_name>.baseBranch`, `gwt.registry.<worktree_name>.basePath`
+   - Used by `_gwt_registry_get_dependents()` for info display and cascade deletion

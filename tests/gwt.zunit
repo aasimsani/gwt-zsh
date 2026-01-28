@@ -1847,6 +1847,135 @@ echo "$@" >> '"$git_log"'
 }
 
 # =============================================================================
+# Root Navigation Tests (_gwt_navigate_root / --root / ...)
+# =============================================================================
+
+@test '_gwt_navigate_root returns main worktree path from linked worktree' {
+    create_test_repo
+    # Use pwd -P to resolve symlinks (macOS /var -> /private/var)
+    local main_path=$(pwd -P)
+
+    # Create a linked worktree
+    gwt test/eng-root-1 >/dev/null 2>&1
+    cd "$PARENT_DIR/test-repo-eng-root-1"
+
+    # Navigate to root should return main worktree
+    _gwt_navigate_root
+
+    assert $(pwd -P) same_as "$main_path"
+    cleanup_test_repo
+}
+
+@test '_gwt_navigate_root handles already being in main worktree' {
+    create_test_repo
+    local main_path=$(pwd)
+
+    # Already in main worktree - should succeed with message
+    run _gwt_navigate_root
+
+    assert $state equals 0
+    assert "$output" contains "Already in main worktree"
+    assert $(pwd) same_as "$main_path"
+    cleanup_test_repo
+}
+
+@test '_gwt_navigate_root works from deeply nested worktree' {
+    create_test_repo
+    local main_path=$(pwd -P)
+
+    # Create parent worktree
+    gwt test/eng-5501-parent >/dev/null 2>&1
+    cd "$PARENT_DIR/test-repo-eng-5501"
+
+    # Create child worktree (stacked) - name will be parent-name + child-suffix
+    gwt --stack test/eng-5502-child >/dev/null 2>&1
+    cd "$PARENT_DIR/test-repo-eng-5501-eng-5502"
+
+    # Navigate to root from deeply nested should go to main
+    _gwt_navigate_root
+
+    assert $(pwd -P) same_as "$main_path"
+    cleanup_test_repo
+}
+
+@test 'gwt --root navigates to main worktree' {
+    create_test_repo
+    local main_path=$(pwd -P)
+
+    gwt test/eng-5503-rootflag >/dev/null 2>&1
+    cd "$PARENT_DIR/test-repo-eng-5503"
+
+    gwt --root
+
+    assert $(pwd -P) same_as "$main_path"
+    cleanup_test_repo
+}
+
+@test 'gwt -r is alias for --root' {
+    create_test_repo
+    local main_path=$(pwd -P)
+
+    gwt test/eng-5504-ralias >/dev/null 2>&1
+    cd "$PARENT_DIR/test-repo-eng-5504"
+
+    gwt -r
+
+    assert $(pwd -P) same_as "$main_path"
+    cleanup_test_repo
+}
+
+@test 'gwt ... navigates to main worktree' {
+    create_test_repo
+    local main_path=$(pwd -P)
+
+    gwt test/eng-5505-dots >/dev/null 2>&1
+    cd "$PARENT_DIR/test-repo-eng-5505"
+
+    gwt ...
+
+    assert $(pwd -P) same_as "$main_path"
+    cleanup_test_repo
+}
+
+@test 'gwt ... works from deeply nested worktree chain' {
+    create_test_repo
+    local main_path=$(pwd -P)
+
+    # Create parent worktree
+    gwt test/eng-5506-dotsparent >/dev/null 2>&1
+    cd "$PARENT_DIR/test-repo-eng-5506"
+
+    # Create child worktree - name will be parent-name + child-suffix
+    gwt --stack test/eng-5507-dotschild >/dev/null 2>&1
+    cd "$PARENT_DIR/test-repo-eng-5506-eng-5507"
+
+    gwt ...
+
+    assert $(pwd -P) same_as "$main_path"
+    cleanup_test_repo
+}
+
+@test 'gwt --root shows message when already in main worktree' {
+    create_test_repo
+
+    run gwt --root
+
+    assert $state equals 0
+    assert "$output" contains "Already in main worktree"
+    cleanup_test_repo
+}
+
+@test 'gwt ... shows message when already in main worktree' {
+    create_test_repo
+
+    run gwt ...
+
+    assert $state equals 0
+    assert "$output" contains "Already in main worktree"
+    cleanup_test_repo
+}
+
+# =============================================================================
 # Phase 6: --info Command Tests
 # =============================================================================
 

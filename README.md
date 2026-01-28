@@ -8,6 +8,7 @@ Stop typing `git worktree add ../myrepo-feature ../myrepo-feature feature/branch
 
 - **Smart Worktree Creation** - Auto-names worktrees from branch names and cd's into them
 - **Worktree Stacking** - Create worktrees from current branch and navigate back to parent
+- **Root Navigation** - Jump to the main worktree from anywhere in the chain
 - **Interactive Pruning** - Clean up old worktrees with fzf multi-select (dependency-aware)
 - **List Worktrees** - See all worktrees at a glance with hierarchy indicators
 - **Copy Config Dirs** - Automatically copy `.vscode/`, `.env`, etc. to new worktrees
@@ -24,6 +25,9 @@ gwt --stack feature/child-branch   # Branches from current, tracks parent
 
 # Navigate back to parent worktree
 gwt --base                         # or: gwt ..
+
+# Navigate to main worktree (ultimate root)
+gwt --root                         # or: gwt ...
 
 # List all worktrees with hierarchy
 gwt --list
@@ -157,6 +161,9 @@ git worktree prune   # Clean up stale references
 ## Usage
 
 ### Creating Worktrees
+
+Create worktrees with automatic naming and instant navigation:
+
 ```bash
 # Create from main branch (default behavior)
 gwt your-name/eng-1234-feature-description
@@ -169,9 +176,23 @@ gwt --stack feature/child-feature    # or: gwt -s feature/child-feature
 gwt --from develop feature/new       # or: gwt -f develop feature/new
 ```
 
+**Example workflow:**
+```bash
+# You're working on main in ~/code/myapp
+cd ~/code/myapp
+
+# Create a worktree for a new feature
+gwt feature/user-auth
+# Now you're in ~/code/myapp-user-auth on branch feature/user-auth
+
+# The original repo is untouched
+ls ~/code/myapp          # Still on main
+ls ~/code/myapp-user-auth # Your new worktree
+```
+
 ### Worktree Stacking
 
-When you use `--stack` or `--from`, gwt tracks the parent-child relationship:
+When you use `--stack` or `--from`, gwt tracks the parent-child relationship. This is useful for dependent feature branches:
 
 ```bash
 # Start on main
@@ -187,33 +208,122 @@ gwt --base                   # or: gwt ..
 gwt --info                   # Shows base branch and dependents
 ```
 
+**Example - Building dependent features:**
+```bash
+# Working on main
+gwt feature/api-v2                    # Create API v2 feature
+
+# Now in api-v2, create dependent UI work
+gwt --stack feature/api-v2-dashboard  # Stacked on api-v2
+
+# Navigate up the chain
+gwt ..                                # Back to api-v2
+gwt ...                               # Back to main (ultimate root)
+```
+
+### Navigation Commands
+
+Navigate between worktrees in a chain:
+
+| Command | Shorthand | Description |
+|---------|-----------|-------------|
+| `gwt --base` | `gwt ..` | Navigate to immediate parent worktree |
+| `gwt --root` | `gwt ...` | Navigate to main worktree (ultimate root) |
+
+**Example - Deep worktree chain:**
+```bash
+# Worktree chain: main -> feature/api -> feature/api-tests -> feature/api-tests-mocks
+# Currently in: feature/api-tests-mocks
+
+gwt ..    # Goes to feature/api-tests (immediate parent)
+gwt ...   # Goes to main (ultimate root, skipping all intermediates)
+```
+
+**When to use each:**
+- `gwt ..` - When you need to go back one level to the parent branch
+- `gwt ...` - When you need to return to the original repo root, regardless of depth
+
 ### Listing Worktrees
+
 ```bash
 gwt --list
 ```
+
 Shows all worktrees with status and hierarchy:
 - `●` exists
 - `○` missing (stale reference)
 - `└─` indicates a stacked worktree
 
+**Example output:**
+```
+Worktrees for myapp:
+
+● main                    ~/code/myapp
+  └─ ● feature/api        ~/code/myapp-api
+      └─ ● feature/api-v2 ~/code/myapp-api-v2
+● feature/unrelated       ~/code/myapp-unrelated
+```
+
 ### Worktree Info
+
 ```bash
 gwt --info       # or: gwt -i
 ```
+
 Shows current worktree's stack relationships:
 - Current branch and path
+- Main worktree (ultimate root)
 - Base worktree (if stacked)
 - Dependent worktrees (children)
 
+**Example output (from a stacked worktree):**
+```
+Worktree Info
+
+  ● Branch: feature/api-v2
+    Path: /Users/you/code/myapp-api-v2
+
+Main Worktree (use gwt ... or gwt --root to navigate)
+
+  ● Path: /Users/you/code/myapp
+
+Base Worktree (use gwt .. or gwt --base to navigate)
+
+  ● Branch: feature/api
+    Path: /Users/you/code/myapp-api
+
+Dependents (worktrees based on this branch)
+
+  ├─ myapp-api-v2-tests
+  ├─ myapp-api-v2-docs
+```
+
 ### Pruning Worktrees
+
 ```bash
 gwt --prune
 ```
+
 Interactive multi-select to remove old worktrees. Shows uncommitted changes warnings and dependency counts before deletion.
+
+**Features:**
+- Multi-select with fzf (or numbered menu fallback)
+- Shows uncommitted changes warning for each worktree
+- Displays dependency count (how many worktrees depend on this one)
+- Double confirmation for safety (yes/no + type "DELETE")
+- Cascade option to delete dependents automatically
+
+**Example workflow:**
+```bash
+gwt --prune
+# Select worktrees with space, confirm with enter
+# Review warnings about uncommitted changes
+# Confirm deletion
+```
 
 ### Copy Config Directories
 
-When creating worktrees, config files (`.vscode/`, `.serena/`, etc.) aren't automatically available.
+When creating worktrees, config files (`.vscode/`, `.serena/`, etc.) aren't automatically available. Use this to copy them:
 
 ```bash
 # Interactive config menu
@@ -229,12 +339,45 @@ gwt --copy-config-dirs .vscode feature/my-branch
 gwt --list-copy-dirs
 ```
 
+**Example - Setting up IDE config for all worktrees:**
+```bash
+# Configure once
+gwt --config
+# Add: .vscode
+# Add: .idea
+# Done
+
+# Now every new worktree gets your IDE settings
+gwt feature/new-feature
+# .vscode/ and .idea/ are automatically copied
+```
+
 ### Other Commands
+
 ```bash
 gwt --version    # Show version
 gwt --update     # Update to latest
 gwt --help       # Show help
 ```
+
+## Command Reference
+
+| Command | Shorthand | Description |
+|---------|-----------|-------------|
+| `gwt <branch>` | | Create worktree from main branch |
+| `gwt --stack <branch>` | `gwt -s <branch>` | Create worktree from current branch |
+| `gwt --from <base> <branch>` | `gwt -f <base> <branch>` | Create worktree from specified branch |
+| `gwt --base` | `gwt ..` | Navigate to parent worktree |
+| `gwt --root` | `gwt ...` | Navigate to main worktree |
+| `gwt --info` | `gwt -i` | Show stack info |
+| `gwt --list` | | List all worktrees |
+| `gwt --prune` | | Interactive worktree cleanup |
+| `gwt --config` | | Configure copy directories |
+| `gwt --copy-config-dirs <dir>` | | Copy directory when creating worktree |
+| `gwt --list-copy-dirs` | | List configured directories |
+| `gwt --version` | | Show version |
+| `gwt --update` | | Update to latest |
+| `gwt --help` | `gwt -h` | Show help |
 
 ## Security
 
