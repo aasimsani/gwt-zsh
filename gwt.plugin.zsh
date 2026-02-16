@@ -721,6 +721,41 @@ _gwt_copy_dirs() {
     done
 }
 
+# Run post-create hook after worktree creation
+# Checks .gwt/post-create.sh first, falls back to GWT_POST_CREATE_CMD env var
+_gwt_run_post_create_hook() {
+    local repo_root="$1"
+    local hook_script="$repo_root/.gwt/post-create.sh"
+
+    # Check for script file first (takes precedence)
+    if [[ -f "$hook_script" ]]; then
+        if [[ ! -x "$hook_script" ]]; then
+            echo "Warning: Hook script is not executable: .gwt/post-create.sh" >&2
+            echo "Run: chmod +x .gwt/post-create.sh" >&2
+            return 0
+        fi
+
+        echo "Running post-create hook: .gwt/post-create.sh"
+        "$hook_script"
+        local exit_code=$?
+        if [[ $exit_code -ne 0 ]]; then
+            echo "Warning: Post-create hook failed with exit code $exit_code" >&2
+        fi
+        return 0
+    fi
+
+    # Fallback to env var
+    if [[ -n "$GWT_POST_CREATE_CMD" ]]; then
+        echo "Running post-create hook: $GWT_POST_CREATE_CMD"
+        eval "$GWT_POST_CREATE_CMD"
+        local exit_code=$?
+        if [[ $exit_code -ne 0 ]]; then
+            echo "Warning: Post-create hook failed with exit code $exit_code" >&2
+        fi
+        return 0
+    fi
+}
+
 # Interactive worktree pruning
 _gwt_prune() {
     # Must be in a git repo
@@ -1271,6 +1306,7 @@ HELP
         echo ""
         echo "Worktree created successfully!"
         cd "$worktree_path"
+        _gwt_run_post_create_hook "$repo_root"
         pwd
     else
         echo "Error: Failed to create worktree" >&2

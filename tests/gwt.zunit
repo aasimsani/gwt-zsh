@@ -2322,3 +2322,185 @@ echo "$@" >> '"$git_log"'
 
     assert "$output" contains "setup-skill"
 }
+
+# =============================================================================
+# Post-Create Hook Tests
+# =============================================================================
+
+@test 'Hook executes script file when present' {
+    create_test_repo
+    mkdir -p "$REPO_DIR/.gwt"
+    cat > "$REPO_DIR/.gwt/post-create.sh" << 'HOOKEOF'
+#!/usr/bin/env zsh
+echo "Hook executed successfully"
+HOOKEOF
+    chmod +x "$REPO_DIR/.gwt/post-create.sh"
+
+    run gwt test/eng-2001-hook-script
+
+    assert $state equals 0
+    assert "$output" contains "Hook executed successfully"
+    cleanup_test_repo
+}
+
+@test 'Hook script runs in worktree directory' {
+    create_test_repo
+    mkdir -p "$REPO_DIR/.gwt"
+    cat > "$REPO_DIR/.gwt/post-create.sh" << 'HOOKEOF'
+#!/usr/bin/env zsh
+echo "HOOKPWD:$(pwd)"
+HOOKEOF
+    chmod +x "$REPO_DIR/.gwt/post-create.sh"
+
+    run gwt test/eng-2002-hook-pwd
+
+    assert $state equals 0
+    assert "$output" contains "HOOKPWD:"
+    assert "$output" contains "test-repo-eng-2002"
+    cleanup_test_repo
+}
+
+@test 'Hook script not executable shows warning' {
+    create_test_repo
+    mkdir -p "$REPO_DIR/.gwt"
+    cat > "$REPO_DIR/.gwt/post-create.sh" << 'HOOKEOF'
+#!/usr/bin/env zsh
+echo "Should not run"
+HOOKEOF
+    # Intentionally NOT chmod +x
+
+    run gwt test/eng-2003-hook-noexec
+
+    assert $state equals 0
+    assert "$output" contains "not executable"
+    assert "$output" does_not_contain "Should not run"
+    cleanup_test_repo
+}
+
+@test 'Hook executes env var command when no script file' {
+    create_test_repo
+
+    GWT_POST_CREATE_CMD="echo 'Env var hook ran'" run gwt test/eng-2004-hook-env
+
+    assert $state equals 0
+    assert "$output" contains "Env var hook ran"
+    cleanup_test_repo
+}
+
+@test 'Hook env var supports commands with arguments' {
+    create_test_repo
+
+    GWT_POST_CREATE_CMD="echo arg1 arg2 arg3" run gwt test/eng-2005-hook-args
+
+    assert $state equals 0
+    assert "$output" contains "arg1 arg2 arg3"
+    cleanup_test_repo
+}
+
+@test 'Script file takes precedence over env var' {
+    create_test_repo
+    mkdir -p "$REPO_DIR/.gwt"
+    cat > "$REPO_DIR/.gwt/post-create.sh" << 'HOOKEOF'
+#!/usr/bin/env zsh
+echo "Script file wins"
+HOOKEOF
+    chmod +x "$REPO_DIR/.gwt/post-create.sh"
+
+    GWT_POST_CREATE_CMD="echo 'Env var loses'" run gwt test/eng-2006-hook-precedence
+
+    assert $state equals 0
+    assert "$output" contains "Script file wins"
+    assert "$output" does_not_contain "Env var loses"
+    cleanup_test_repo
+}
+
+@test 'Hook failure does not abort worktree creation' {
+    create_test_repo
+    mkdir -p "$REPO_DIR/.gwt"
+    cat > "$REPO_DIR/.gwt/post-create.sh" << 'HOOKEOF'
+#!/usr/bin/env zsh
+exit 1
+HOOKEOF
+    chmod +x "$REPO_DIR/.gwt/post-create.sh"
+
+    run gwt test/eng-2007-hook-fail
+
+    assert $state equals 0
+    assert "$output" contains "Worktree created successfully"
+    cleanup_test_repo
+}
+
+@test 'Hook failure shows warning with exit code' {
+    create_test_repo
+    mkdir -p "$REPO_DIR/.gwt"
+    cat > "$REPO_DIR/.gwt/post-create.sh" << 'HOOKEOF'
+#!/usr/bin/env zsh
+exit 42
+HOOKEOF
+    chmod +x "$REPO_DIR/.gwt/post-create.sh"
+
+    run gwt test/eng-2008-hook-exitcode
+
+    assert $state equals 0
+    assert "$output" contains "42"
+    cleanup_test_repo
+}
+
+@test 'Non-existent command in env var shows warning' {
+    create_test_repo
+
+    GWT_POST_CREATE_CMD="nonexistent_cmd_xyz_12345" run gwt test/eng-2009-hook-badcmd
+
+    assert $state equals 0
+    assert "$output" contains "Worktree created successfully"
+    cleanup_test_repo
+}
+
+@test 'No hook configured has no hook output' {
+    create_test_repo
+
+    run gwt test/eng-2010-hook-none
+
+    assert $state equals 0
+    assert "$output" contains "Worktree created successfully"
+    assert "$output" does_not_contain "post-create"
+    cleanup_test_repo
+}
+
+@test 'Empty env var treated as not configured' {
+    create_test_repo
+
+    GWT_POST_CREATE_CMD="" run gwt test/eng-2011-hook-empty
+
+    assert $state equals 0
+    assert "$output" does_not_contain "post-create"
+    cleanup_test_repo
+}
+
+@test 'Hook execution prints what is being run for script' {
+    create_test_repo
+    mkdir -p "$REPO_DIR/.gwt"
+    cat > "$REPO_DIR/.gwt/post-create.sh" << 'HOOKEOF'
+#!/usr/bin/env zsh
+echo "deps installed"
+HOOKEOF
+    chmod +x "$REPO_DIR/.gwt/post-create.sh"
+
+    run gwt test/eng-2012-hook-transparency
+
+    assert $state equals 0
+    assert "$output" contains "post-create"
+    assert "$output" contains ".gwt/post-create.sh"
+    cleanup_test_repo
+}
+
+@test 'Hook execution prints command for env var' {
+    create_test_repo
+
+    GWT_POST_CREATE_CMD="echo hello" run gwt test/eng-2013-hook-envtransparency
+
+    assert $state equals 0
+    assert "$output" contains "post-create"
+    assert "$output" contains "echo hello"
+    cleanup_test_repo
+}
