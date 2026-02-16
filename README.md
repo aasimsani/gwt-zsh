@@ -71,6 +71,8 @@ git clone https://github.com/aasimsani/gwt-zsh ~/.oh-my-zsh/custom/plugins/gwt
 omz plugin enable gwt
 ```
 
+> **Note:** If you use the OMZ `git` plugin, it defines an alias `gwt='git worktree'` that conflicts with this plugin. gwt-zsh automatically removes this alias on load and prints a warning. No action needed on your part.
+
 ### Other Plugin Managers
 ```zsh
 # Antigen
@@ -115,8 +117,24 @@ export GWT_MAIN_BRANCH="main"
 # Directories to copy to new worktrees
 export GWT_COPY_DIRS=".vscode,.env"
 
+# Alias for gwt command (default: "wt")
+# Set to "" to disable, or any string for a custom alias
+export GWT_ALIAS="wt"
+
 # Disable fzf menus
 export GWT_NO_FZF=1
+```
+
+By default, gwt creates a `wt` alias so you can use `wt` instead of `gwt`:
+```bash
+wt feature/add-user-auth          # Same as: gwt feature/add-user-auth
+wt --stack feature/child-branch   # Same as: gwt --stack feature/child-branch
+```
+
+To disable the alias or use a custom one:
+```bash
+export GWT_ALIAS=""       # No alias
+export GWT_ALIAS="gw"    # Use 'gw' instead of 'wt'
 ```
 
 ## Uninstallation

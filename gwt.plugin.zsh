@@ -17,6 +17,7 @@
 #
 # Environment Variables:
 #   GWT_COPY_DIRS             Comma-separated list of directories to always copy
+#   GWT_ALIAS                 Alias for gwt command (default: "wt", set "" to disable)
 #
 # Examples:
 #   gwt aasim/eng-1045-allow-changing-user-types  -> ../repo-eng-1045
@@ -888,6 +889,12 @@ _gwt_prune() {
     print -P "%F{green}✓%f Done! Removed ${#to_prune[@]} worktree(s)"
 }
 
+# Remove conflicting alias (e.g. OMZ git plugin defines gwt='git worktree')
+if (( ${+aliases[gwt]} )); then
+    print -P "%F{yellow}gwt:%f removed conflicting alias gwt='${aliases[gwt]}'"
+    unalias gwt
+fi
+
 gwt() {
     # Handle flags that don't require git repo
     case "$1" in
@@ -927,6 +934,7 @@ Other Options:
 Environment Variables:
   GWT_MAIN_BRANCH           Default base branch for new worktrees (default: main)
   GWT_COPY_DIRS             Comma-separated list of directories to always copy
+  GWT_ALIAS                 Alias for gwt command (default: "wt", set "" to disable)
   GWT_NO_FZF                Set to 1 to disable fzf menus (use numbered fallback)
 
 Examples:
@@ -1154,6 +1162,7 @@ HELP
         echo ""
         echo "Environment Variables:"
         echo "  GWT_COPY_DIRS  Comma-separated list of directories to always copy"
+        echo "  GWT_ALIAS      Alias for gwt command (default: \"wt\", set \"\" to disable)"
         echo ""
         echo "Examples:"
         echo "  gwt aasim/eng-1045-allow-changing-user-types"
@@ -1280,3 +1289,14 @@ HELP
         return 1
     fi
 }
+
+# Configurable alias (default: wt)
+# Set GWT_ALIAS="" to disable, or GWT_ALIAS=myalias for custom
+if [[ -z "${GWT_ALIAS+x}" ]]; then
+    # Not set at all — use default
+    alias wt=gwt
+elif [[ -n "$GWT_ALIAS" ]]; then
+    # Set to a non-empty value — use that
+    alias "${GWT_ALIAS}=gwt"
+fi
+# If GWT_ALIAS="" (empty string), no alias created

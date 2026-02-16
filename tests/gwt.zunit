@@ -2322,3 +2322,176 @@ echo "$@" >> '"$git_log"'
 
     assert "$output" contains "setup-skill"
 }
+
+# =============================================================================
+# Phase 1: --open Flag Tests (_gwt_open)
+# =============================================================================
+
+@test '_gwt_open uses GWT_EDITOR when set' {
+    export GWT_EDITOR="test-editor"
+
+    # Mock test-editor command that does nothing
+    test-editor() { : }
+
+    run _gwt_open
+
+    assert $state equals 0
+    assert "$output" contains "test-editor"
+    unset GWT_EDITOR
+}
+
+@test '_gwt_open uses $EDITOR when GWT_EDITOR not set' {
+    unset GWT_EDITOR
+    export EDITOR="vim-editor"
+
+    # Mock vim-editor command that does nothing
+    vim-editor() { : }
+
+    run _gwt_open
+
+    assert $state equals 0
+    assert "$output" contains "vim-editor"
+    unset EDITOR
+}
+
+@test '_gwt_open shows warning when no editor found' {
+    unset GWT_EDITOR EDITOR
+
+    run _gwt_open
+
+    assert $state equals 1
+    assert "$output" contains "Warning"
+    assert "$output" contains "No editor found"
+}
+
+@test 'gwt --open creates worktree and opens editor' {
+    create_test_repo
+    export GWT_EDITOR="mock-editor"
+
+    # Mock mock-editor command that does nothing
+    mock-editor() { : }
+
+    run gwt --open test/eng-9000-open-test
+
+    assert $state equals 0
+    assert "$output" contains "Worktree created"
+    assert "$output" contains "Opening"
+    unset GWT_EDITOR
+    cleanup_test_repo
+}
+
+@test 'gwt -o is alias for --open' {
+    create_test_repo
+    export GWT_EDITOR="mock-editor"
+
+    mock-editor() { : }
+
+    run gwt -o test/eng-9001-open-alias
+
+    assert $state equals 0
+    assert "$output" contains "Worktree created"
+    unset GWT_EDITOR
+    cleanup_test_repo
+}
+
+@test 'gwt --help mentions --open flag' {
+    run gwt --help
+
+    assert "$output" contains "open"
+}
+
+# =============================================================================
+# Phase 1: Tab Completion Tests (_gwt completion)
+# =============================================================================
+
+@test '_gwt completion function exists' {
+    run type _gwt
+
+    assert $state equals 0
+    assert "$output" contains "function"
+}
+
+@test '_gwt compdef is registered for gwt' {
+    # Check compdef registration in plugin file
+    run grep -q "compdef _gwt gwt" "${GWT_INSTALL_DIR}/gwt.plugin.zsh" 2>/dev/null || grep -q "compdef _gwt gwt" "${0:A:h}/../gwt.plugin.zsh"
+
+    assert $state equals 0
+}
+
+@test '_gwt completion includes --open flag' {
+    # Get completion function definition and check for --open
+    run grep "compdef _gwt gwt" "${GWT_INSTALL_DIR}/gwt.plugin.zsh" -A 30 2>/dev/null || grep "compdef _gwt gwt" "${0:A:h}/../gwt.plugin.zsh" -A 30
+
+    assert $state equals 0
+    assert "$output" contains "--open"
+}
+
+# =============================================================================
+# OMZ Alias Conflict Tests (Issue #14)
+# =============================================================================
+
+@test 'gwt function works when gwt alias was previously defined' {
+    # Simulate the OMZ git plugin conflict
+    alias gwt='git worktree'
+
+    # Re-source the plugin - should unalias and define gwt function
+    source "$REPO_ROOT/gwt.plugin.zsh"
+
+    # gwt should now be a function, not an alias
+    local type_output=$(type gwt)
+    assert "$type_output" contains "function"
+}
+
+@test 'gwt prints warning when removing conflicting alias' {
+    alias gwt='git worktree'
+
+    # Capture output from sourcing
+    local source_output=$(source "$REPO_ROOT/gwt.plugin.zsh" 2>&1)
+
+    assert "$source_output" contains "removed conflicting alias"
+    assert "$source_output" contains "git worktree"
+}
+
+# =============================================================================
+# GWT_ALIAS Configuration Tests
+# =============================================================================
+
+@test 'default wt alias is created when GWT_ALIAS is not set' {
+    unset GWT_ALIAS
+
+    source "$REPO_ROOT/gwt.plugin.zsh"
+
+    local type_output=$(type wt 2>&1)
+    assert "$type_output" contains "gwt"
+    unalias wt 2>/dev/null
+}
+
+@test 'custom alias is created when GWT_ALIAS is set' {
+    export GWT_ALIAS="gw"
+
+    source "$REPO_ROOT/gwt.plugin.zsh"
+
+    local type_output=$(type gw 2>&1)
+    assert "$type_output" contains "gwt"
+    unalias gw 2>/dev/null
+    unset GWT_ALIAS
+}
+
+@test 'no alias is created when GWT_ALIAS is empty string' {
+    # Clean up any wt alias from previous source
+    unalias wt 2>/dev/null
+    export GWT_ALIAS=""
+
+    source "$REPO_ROOT/gwt.plugin.zsh"
+
+    run type wt 2>&1
+
+    assert "$output" contains "not found"
+    unset GWT_ALIAS
+}
+
+@test 'gwt --help mentions GWT_ALIAS' {
+    run gwt --help
+
+    assert "$output" contains "GWT_ALIAS"
+}
