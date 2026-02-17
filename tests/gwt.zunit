@@ -702,10 +702,10 @@ echo "$@" >> '"$git_log"'
 
 @test 'gwt --list-copy-dirs shows configured dirs' {
     local test_dir=$(mktemp -d)
-    local test_zshrc="$test_dir/.zshrc"
-    echo 'export GWT_COPY_DIRS="serena,.vscode"' > "$test_zshrc"
+    mkdir -p "$test_dir/.config/gwt"
+    echo 'GWT_COPY_DIRS=serena,.vscode' > "$test_dir/.config/gwt/config"
 
-    HOME="$test_dir" run gwt --list-copy-dirs
+    GWT_COPY_DIRS="" HOME="$test_dir" run gwt --list-copy-dirs
 
     assert $state equals 0
     assert "$output" contains "serena"
@@ -768,17 +768,17 @@ echo "$@" >> '"$git_log"'
 # =============================================================================
 
 @test 'Security: config remove handles dot in directory name correctly' {
-    # This tests the regex escaping fix for line 266
+    # This tests the regex escaping fix
     # Without escaping, "foo.bar" could match "fooXbar" due to regex wildcard
     local test_dir=$(mktemp -d)
-    local test_zshrc="$test_dir/.zshrc"
-    echo 'export GWT_COPY_DIRS="foo.bar,fooXbar,other"' > "$test_zshrc"
+    mkdir -p "$test_dir/.config/gwt"
+    echo 'GWT_COPY_DIRS=foo.bar,fooXbar,other' > "$test_dir/.config/gwt/config"
 
-    # Simulate the _gwt_config menu: choice 2 (remove), enter "foo.bar", choice 4 (done)
-    HOME="$test_dir" run _gwt_config <<< $'2\nfoo.bar\n4'
+    # Top menu: 1 (copy dirs), sub-menu: 2 (remove), enter "foo.bar", 4 (back), 7 (done)
+    HOME="$test_dir" run _gwt_config <<< $'1\n2\nfoo.bar\n4\n7'
 
     # Read the resulting config
-    local result=$(_gwt_config_read "$test_zshrc")
+    local result=$(_gwt_config_read_file "GWT_COPY_DIRS" "$test_dir/.config/gwt/config")
 
     # fooXbar should still be present (not incorrectly matched by foo.bar pattern)
     assert "$result" contains "fooXbar"
@@ -915,26 +915,26 @@ echo "$@" >> '"$git_log"'
 
 @test '_gwt_config add directory to empty config' {
     local test_dir=$(mktemp -d)
-    local test_zshrc="$test_dir/.zshrc"
-    echo '# empty' > "$test_zshrc"
+    mkdir -p "$test_dir/.config/gwt"
+    touch "$test_dir/.config/gwt/config"
 
-    # Menu: 1 (add), enter "serena", 4 (done)
-    HOME="$test_dir" run _gwt_config <<< $'1\nserena\n4'
+    # Top menu: 1 (copy dirs), sub-menu: 1 (add), enter "serena", 4 (back), 7 (done)
+    HOME="$test_dir" run _gwt_config <<< $'1\n1\nserena\n4\n7'
 
-    local result=$(_gwt_config_read "$test_zshrc")
+    local result=$(_gwt_config_read_file "GWT_COPY_DIRS" "$test_dir/.config/gwt/config")
     assert "$result" same_as "serena"
     rm -rf "$test_dir"
 }
 
 @test '_gwt_config add directory to existing config' {
     local test_dir=$(mktemp -d)
-    local test_zshrc="$test_dir/.zshrc"
-    echo 'export GWT_COPY_DIRS="existing"' > "$test_zshrc"
+    mkdir -p "$test_dir/.config/gwt"
+    echo 'GWT_COPY_DIRS=existing' > "$test_dir/.config/gwt/config"
 
-    # Menu: 1 (add), enter "newdir", 4 (done)
-    HOME="$test_dir" run _gwt_config <<< $'1\nnewdir\n4'
+    # Top menu: 1 (copy dirs), sub-menu: 1 (add), enter "newdir", 4 (back), 7 (done)
+    HOME="$test_dir" run _gwt_config <<< $'1\n1\nnewdir\n4\n7'
 
-    local result=$(_gwt_config_read "$test_zshrc")
+    local result=$(_gwt_config_read_file "GWT_COPY_DIRS" "$test_dir/.config/gwt/config")
     assert "$result" contains "existing"
     assert "$result" contains "newdir"
     rm -rf "$test_dir"
@@ -942,11 +942,11 @@ echo "$@" >> '"$git_log"'
 
 @test '_gwt_config detects duplicate directory' {
     local test_dir=$(mktemp -d)
-    local test_zshrc="$test_dir/.zshrc"
-    echo 'export GWT_COPY_DIRS="serena"' > "$test_zshrc"
+    mkdir -p "$test_dir/.config/gwt"
+    echo 'GWT_COPY_DIRS=serena' > "$test_dir/.config/gwt/config"
 
-    # Menu: 1 (add), enter "serena" (duplicate), 4 (done)
-    HOME="$test_dir" run _gwt_config <<< $'1\nserena\n4'
+    # Top menu: 1 (copy dirs), sub-menu: 1 (add), enter "serena" (duplicate), 4 (back), 7 (done)
+    HOME="$test_dir" run _gwt_config <<< $'1\n1\nserena\n4\n7'
 
     assert "$output" contains "already configured"
     rm -rf "$test_dir"
@@ -954,24 +954,24 @@ echo "$@" >> '"$git_log"'
 
 @test '_gwt_config remove directory from config' {
     local test_dir=$(mktemp -d)
-    local test_zshrc="$test_dir/.zshrc"
-    echo 'export GWT_COPY_DIRS="serena,vscode"' > "$test_zshrc"
+    mkdir -p "$test_dir/.config/gwt"
+    echo 'GWT_COPY_DIRS=serena,vscode' > "$test_dir/.config/gwt/config"
 
-    # Menu: 2 (remove), enter "serena", 4 (done)
-    HOME="$test_dir" run _gwt_config <<< $'2\nserena\n4'
+    # Top menu: 1 (copy dirs), sub-menu: 2 (remove), enter "serena", 4 (back), 7 (done)
+    HOME="$test_dir" run _gwt_config <<< $'1\n2\nserena\n4\n7'
 
-    local result=$(_gwt_config_read "$test_zshrc")
+    local result=$(_gwt_config_read_file "GWT_COPY_DIRS" "$test_dir/.config/gwt/config")
     assert "$result" same_as "vscode"
     rm -rf "$test_dir"
 }
 
 @test '_gwt_config remove from empty shows message' {
     local test_dir=$(mktemp -d)
-    local test_zshrc="$test_dir/.zshrc"
-    echo '# empty' > "$test_zshrc"
+    mkdir -p "$test_dir/.config/gwt"
+    touch "$test_dir/.config/gwt/config"
 
-    # Menu: 2 (remove), 4 (done)
-    HOME="$test_dir" run _gwt_config <<< $'2\n4'
+    # Top menu: 1 (copy dirs), sub-menu: 2 (remove), 4 (back), 7 (done)
+    HOME="$test_dir" run _gwt_config <<< $'1\n2\n4\n7'
 
     assert "$output" contains "No directories to remove"
     rm -rf "$test_dir"
@@ -979,11 +979,11 @@ echo "$@" >> '"$git_log"'
 
 @test '_gwt_config list shows directories' {
     local test_dir=$(mktemp -d)
-    local test_zshrc="$test_dir/.zshrc"
-    echo 'export GWT_COPY_DIRS="serena,vscode"' > "$test_zshrc"
+    mkdir -p "$test_dir/.config/gwt"
+    echo 'GWT_COPY_DIRS=serena,vscode' > "$test_dir/.config/gwt/config"
 
-    # Menu: 3 (list), 4 (done)
-    HOME="$test_dir" run _gwt_config <<< $'3\n4'
+    # Top menu: 1 (copy dirs), sub-menu: 3 (list), 4 (back), 7 (done)
+    HOME="$test_dir" run _gwt_config <<< $'1\n3\n4\n7'
 
     assert "$output" contains "serena"
     assert "$output" contains "vscode"
@@ -992,11 +992,11 @@ echo "$@" >> '"$git_log"'
 
 @test '_gwt_config list empty shows no dirs message' {
     local test_dir=$(mktemp -d)
-    local test_zshrc="$test_dir/.zshrc"
-    echo '# empty' > "$test_zshrc"
+    mkdir -p "$test_dir/.config/gwt"
+    touch "$test_dir/.config/gwt/config"
 
-    # Menu: 3 (list), 4 (done)
-    HOME="$test_dir" run _gwt_config <<< $'3\n4'
+    # Top menu: 1 (copy dirs), sub-menu: 3 (list), 4 (back), 7 (done)
+    HOME="$test_dir" run _gwt_config <<< $'1\n3\n4\n7'
 
     assert "$output" contains "No directories configured"
     rm -rf "$test_dir"
@@ -1004,11 +1004,11 @@ echo "$@" >> '"$git_log"'
 
 @test '_gwt_config invalid choice shows error' {
     local test_dir=$(mktemp -d)
-    local test_zshrc="$test_dir/.zshrc"
-    echo '# empty' > "$test_zshrc"
+    mkdir -p "$test_dir/.config/gwt"
+    touch "$test_dir/.config/gwt/config"
 
-    # Menu: 9 (invalid), 4 (done)
-    HOME="$test_dir" run _gwt_config <<< $'9\n4'
+    # Top menu: 9 (invalid), 7 (done)
+    HOME="$test_dir" run _gwt_config <<< $'9\n7'
 
     assert "$output" contains "Invalid choice"
     rm -rf "$test_dir"
@@ -2680,4 +2680,586 @@ HOOKEOF
     run gwt --help
 
     assert "$output" contains "repair"
+}
+
+# =============================================================================
+# Layered Config System Tests
+# =============================================================================
+
+# --- _gwt_config_read_file tests ---
+
+@test '_gwt_config_read_file reads key from config file' {
+    local test_dir=$(mktemp -d)
+    local config_file="$test_dir/config"
+    echo 'GWT_MAIN_BRANCH=develop' > "$config_file"
+
+    local result=$(_gwt_config_read_file "GWT_MAIN_BRANCH" "$config_file")
+
+    assert "$result" same_as "develop"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config_read_file returns empty for missing key' {
+    local test_dir=$(mktemp -d)
+    local config_file="$test_dir/config"
+    echo 'GWT_ALIAS=wt' > "$config_file"
+
+    local result=$(_gwt_config_read_file "GWT_MAIN_BRANCH" "$config_file")
+
+    assert "$result" is_empty
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config_read_file returns empty for missing file' {
+    local result=$(_gwt_config_read_file "GWT_MAIN_BRANCH" "/nonexistent/path/config")
+
+    assert "$result" is_empty
+}
+
+@test '_gwt_config_read_file handles comments and blank lines' {
+    local test_dir=$(mktemp -d)
+    local config_file="$test_dir/config"
+    cat > "$config_file" << 'EOF'
+# This is a comment
+GWT_ALIAS=gw
+
+# Another comment
+GWT_MAIN_BRANCH=develop
+EOF
+
+    local result=$(_gwt_config_read_file "GWT_MAIN_BRANCH" "$config_file")
+
+    assert "$result" same_as "develop"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config_read_file handles quoted values' {
+    local test_dir=$(mktemp -d)
+    local config_file="$test_dir/config"
+    echo 'GWT_POST_CREATE_CMD="npm install"' > "$config_file"
+
+    local result=$(_gwt_config_read_file "GWT_POST_CREATE_CMD" "$config_file")
+
+    assert "$result" same_as "npm install"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config_read_file reads empty value for key with no value' {
+    local test_dir=$(mktemp -d)
+    local config_file="$test_dir/config"
+    echo 'GWT_ALIAS=' > "$config_file"
+
+    local result=$(_gwt_config_read_file "GWT_ALIAS" "$config_file")
+
+    assert "$result" is_empty
+    rm -rf "$test_dir"
+}
+
+# --- _gwt_config_write_file tests ---
+
+@test '_gwt_config_write_file adds new key to config file' {
+    local test_dir=$(mktemp -d)
+    local config_file="$test_dir/config"
+    echo '# gwt config' > "$config_file"
+
+    _gwt_config_write_file "GWT_MAIN_BRANCH" "develop" "$config_file"
+
+    assert "$(cat "$config_file")" contains "GWT_MAIN_BRANCH=develop"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config_write_file replaces existing key' {
+    local test_dir=$(mktemp -d)
+    local config_file="$test_dir/config"
+    echo 'GWT_MAIN_BRANCH=old' > "$config_file"
+
+    _gwt_config_write_file "GWT_MAIN_BRANCH" "develop" "$config_file"
+
+    local count=$(grep -c 'GWT_MAIN_BRANCH' "$config_file")
+    assert "$count" equals 1
+    assert "$(cat "$config_file")" contains "GWT_MAIN_BRANCH=develop"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config_write_file removes key when value empty' {
+    local test_dir=$(mktemp -d)
+    local config_file="$test_dir/config"
+    echo 'GWT_MAIN_BRANCH=develop' > "$config_file"
+
+    _gwt_config_write_file "GWT_MAIN_BRANCH" "" "$config_file"
+
+    assert "$(cat "$config_file")" does_not_contain "GWT_MAIN_BRANCH"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config_write_file creates parent directories' {
+    local test_dir=$(mktemp -d)
+    local config_file="$test_dir/subdir/gwt/config"
+
+    _gwt_config_write_file "GWT_MAIN_BRANCH" "develop" "$config_file"
+
+    assert "$(cat "$config_file")" contains "GWT_MAIN_BRANCH=develop"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config_write_file preserves other keys' {
+    local test_dir=$(mktemp -d)
+    local config_file="$test_dir/config"
+    cat > "$config_file" << 'EOF'
+GWT_ALIAS=wt
+GWT_MAIN_BRANCH=old
+GWT_NO_FZF=1
+EOF
+
+    _gwt_config_write_file "GWT_MAIN_BRANCH" "develop" "$config_file"
+
+    assert "$(cat "$config_file")" contains "GWT_ALIAS=wt"
+    assert "$(cat "$config_file")" contains "GWT_MAIN_BRANCH=develop"
+    assert "$(cat "$config_file")" contains "GWT_NO_FZF=1"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config_write_file can write empty value explicitly' {
+    local test_dir=$(mktemp -d)
+    local config_file="$test_dir/config"
+    echo '# config' > "$config_file"
+
+    _gwt_config_write_file "GWT_ALIAS" "" "$config_file" --keep-empty
+
+    assert "$(cat "$config_file")" contains "GWT_ALIAS="
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config_write_file sanitizes dangerous characters' {
+    local test_dir=$(mktemp -d)
+    local config_file="$test_dir/config"
+    echo '# config' > "$config_file"
+
+    _gwt_config_write_file "GWT_POST_CREATE_CMD" 'echo hello`whoami`end' "$config_file"
+
+    local content=$(cat "$config_file")
+    # Backticks should be stripped, leaving safe text
+    assert "$content" does_not_contain '`'
+    assert "$content" does_not_contain '$'
+    rm -rf "$test_dir"
+}
+
+# --- _gwt_config_resolve tests ---
+
+@test '_gwt_config_resolve returns default when nothing configured' {
+    local test_dir=$(mktemp -d)
+    # No config files, no env vars
+    HOME="$test_dir" run _gwt_config_resolve "GWT_MAIN_BRANCH" "main"
+
+    assert "$output" same_as "main"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config_resolve reads from global config' {
+    local test_dir=$(mktemp -d)
+    mkdir -p "$test_dir/.config/gwt"
+    echo 'GWT_MAIN_BRANCH=develop' > "$test_dir/.config/gwt/config"
+
+    HOME="$test_dir" run _gwt_config_resolve "GWT_MAIN_BRANCH" "main"
+
+    assert "$output" same_as "develop"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config_resolve local overrides global' {
+    create_test_repo
+    local test_home=$(mktemp -d)
+
+    # Global config
+    mkdir -p "$test_home/.config/gwt"
+    echo 'GWT_MAIN_BRANCH=develop' > "$test_home/.config/gwt/config"
+
+    # Local config (in repo)
+    mkdir -p "$REPO_DIR/.gwt"
+    echo 'GWT_MAIN_BRANCH=staging' > "$REPO_DIR/.gwt/config"
+
+    cd "$REPO_DIR"
+    HOME="$test_home" run _gwt_config_resolve "GWT_MAIN_BRANCH" "main"
+
+    assert "$output" same_as "staging"
+    rm -rf "$test_home"
+    cleanup_test_repo
+}
+
+@test '_gwt_config_resolve env var overrides all' {
+    create_test_repo
+    local test_home=$(mktemp -d)
+
+    # Global config
+    mkdir -p "$test_home/.config/gwt"
+    echo 'GWT_MAIN_BRANCH=develop' > "$test_home/.config/gwt/config"
+
+    # Local config
+    mkdir -p "$REPO_DIR/.gwt"
+    echo 'GWT_MAIN_BRANCH=staging' > "$REPO_DIR/.gwt/config"
+
+    cd "$REPO_DIR"
+    GWT_MAIN_BRANCH=production HOME="$test_home" run _gwt_config_resolve "GWT_MAIN_BRANCH" "main"
+
+    assert "$output" same_as "production"
+    rm -rf "$test_home"
+    cleanup_test_repo
+}
+
+@test '_gwt_config_resolve falls through layers correctly' {
+    create_test_repo
+    local test_home=$(mktemp -d)
+
+    # Only global config set
+    mkdir -p "$test_home/.config/gwt"
+    echo 'GWT_ALIAS=gw' > "$test_home/.config/gwt/config"
+
+    # No local config, no env var
+    cd "$REPO_DIR"
+    HOME="$test_home" run _gwt_config_resolve "GWT_ALIAS" "wt"
+
+    assert "$output" same_as "gw"
+
+    # Key not in any config
+    HOME="$test_home" run _gwt_config_resolve "GWT_NO_FZF" ""
+
+    assert "$output" is_empty
+    rm -rf "$test_home"
+    cleanup_test_repo
+}
+
+# --- _gwt_migrate_config tests ---
+
+@test '_gwt_migrate_config copies GWT vars from zshrc to global config' {
+    local test_dir=$(mktemp -d)
+    local test_zshrc="$test_dir/.zshrc"
+    cat > "$test_zshrc" << 'EOF'
+# my shell config
+export GWT_MAIN_BRANCH="develop"
+export GWT_COPY_DIRS="serena,.vscode"
+export GWT_ALIAS="gw"
+EOF
+
+    HOME="$test_dir" run _gwt_migrate_config
+
+    local config_file="$test_dir/.config/gwt/config"
+    assert "$(cat "$config_file")" contains "GWT_MAIN_BRANCH=develop"
+    assert "$(cat "$config_file")" contains "GWT_COPY_DIRS=serena,.vscode"
+    assert "$(cat "$config_file")" contains "GWT_ALIAS=gw"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_migrate_config preserves zshrc lines' {
+    local test_dir=$(mktemp -d)
+    local test_zshrc="$test_dir/.zshrc"
+    cat > "$test_zshrc" << 'EOF'
+export PATH="/usr/local/bin:$PATH"
+export GWT_MAIN_BRANCH="develop"
+alias ll='ls -la'
+EOF
+
+    HOME="$test_dir" run _gwt_migrate_config
+
+    # zshrc should still have the GWT line
+    assert "$(cat "$test_zshrc")" contains 'export GWT_MAIN_BRANCH="develop"'
+    # and other content intact
+    assert "$(cat "$test_zshrc")" contains 'alias ll'
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_migrate_config prints migration message' {
+    local test_dir=$(mktemp -d)
+    local test_zshrc="$test_dir/.zshrc"
+    echo 'export GWT_MAIN_BRANCH="develop"' > "$test_zshrc"
+
+    HOME="$test_dir" run _gwt_migrate_config
+
+    assert "$output" contains "migrated"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_migrate_config skips if global config already exists' {
+    local test_dir=$(mktemp -d)
+    local test_zshrc="$test_dir/.zshrc"
+    echo 'export GWT_MAIN_BRANCH="develop"' > "$test_zshrc"
+    mkdir -p "$test_dir/.config/gwt"
+    echo 'GWT_MAIN_BRANCH=existing' > "$test_dir/.config/gwt/config"
+
+    HOME="$test_dir" run _gwt_migrate_config
+
+    # Should NOT overwrite existing config
+    assert "$(cat "$test_dir/.config/gwt/config")" contains "GWT_MAIN_BRANCH=existing"
+    assert "$(cat "$test_dir/.config/gwt/config")" does_not_contain "develop"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_migrate_config skips if no GWT vars in zshrc' {
+    local test_dir=$(mktemp -d)
+    local test_zshrc="$test_dir/.zshrc"
+    echo '# just a normal zshrc' > "$test_zshrc"
+
+    HOME="$test_dir" run _gwt_migrate_config
+
+    assert "$output" is_empty
+    # No config file created
+    [[ ! -f "$test_dir/.config/gwt/config" ]]
+    assert $? equals 0
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_migrate_config shows deprecation warning when zshrc has GWT vars' {
+    local test_dir=$(mktemp -d)
+    local test_zshrc="$test_dir/.zshrc"
+    echo 'export GWT_MAIN_BRANCH="develop"' > "$test_zshrc"
+
+    HOME="$test_dir" run _gwt_migrate_config
+
+    assert "$output" contains "deprecated"
+    rm -rf "$test_dir"
+}
+
+# =============================================================================
+# Expanded Config Menu Tests
+# =============================================================================
+
+@test '_gwt_config top-level menu shows all settings' {
+    local test_dir=$(mktemp -d)
+    mkdir -p "$test_dir/.config/gwt"
+    touch "$test_dir/.config/gwt/config"
+
+    # Select 7 (Done) immediately
+    HOME="$test_dir" run _gwt_config <<< $'7'
+
+    assert "$output" contains "Copy directories"
+    assert "$output" contains "Main branch"
+    assert "$output" contains "Command alias"
+    assert "$output" contains "fzf"
+    assert "$output" contains "Post-create"
+    assert "$output" contains "Done"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config main branch setting via menu' {
+    local test_dir=$(mktemp -d)
+    mkdir -p "$test_dir/.config/gwt"
+    touch "$test_dir/.config/gwt/config"
+
+    # Select 2 (Main branch), enter "develop", then 7 (Done)
+    HOME="$test_dir" run _gwt_config <<< $'2\ndevelop\n7'
+
+    local result=$(_gwt_config_read_file "GWT_MAIN_BRANCH" "$test_dir/.config/gwt/config")
+    assert "$result" same_as "develop"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config main branch rejects invalid names' {
+    local test_dir=$(mktemp -d)
+    mkdir -p "$test_dir/.config/gwt"
+    touch "$test_dir/.config/gwt/config"
+
+    # Select 2 (Main branch), enter bad name, then 7 (Done)
+    HOME="$test_dir" run _gwt_config <<< $'2\nbad branch name\n7'
+
+    assert "$output" contains "Invalid"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config main branch reset to default' {
+    local test_dir=$(mktemp -d)
+    mkdir -p "$test_dir/.config/gwt"
+    echo 'GWT_MAIN_BRANCH=develop' > "$test_dir/.config/gwt/config"
+
+    # Select 2 (Main branch), enter empty (reset), then 7 (Done)
+    HOME="$test_dir" run _gwt_config <<< $'2\n\n7'
+
+    local result=$(_gwt_config_read_file "GWT_MAIN_BRANCH" "$test_dir/.config/gwt/config")
+    assert "$result" is_empty
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config alias set custom' {
+    local test_dir=$(mktemp -d)
+    mkdir -p "$test_dir/.config/gwt"
+    touch "$test_dir/.config/gwt/config"
+
+    # Select 3 (Alias), 1 (set custom), enter "gw", then 7 (Done)
+    HOME="$test_dir" run _gwt_config <<< $'3\n1\ngw\n7'
+
+    local result=$(_gwt_config_read_file "GWT_ALIAS" "$test_dir/.config/gwt/config")
+    assert "$result" same_as "gw"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config alias disable' {
+    local test_dir=$(mktemp -d)
+    mkdir -p "$test_dir/.config/gwt"
+    echo 'GWT_ALIAS=wt' > "$test_dir/.config/gwt/config"
+
+    # Select 3 (Alias), 2 (disable), then 7 (Done)
+    HOME="$test_dir" run _gwt_config <<< $'3\n2\n7'
+
+    # Should have GWT_ALIAS= (empty value, meaning disabled)
+    assert "$(cat "$test_dir/.config/gwt/config")" contains "GWT_ALIAS="
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config alias reset to default' {
+    local test_dir=$(mktemp -d)
+    mkdir -p "$test_dir/.config/gwt"
+    echo 'GWT_ALIAS=gw' > "$test_dir/.config/gwt/config"
+
+    # Select 3 (Alias), 3 (reset to default), then 7 (Done)
+    HOME="$test_dir" run _gwt_config <<< $'3\n3\n7'
+
+    # Should remove GWT_ALIAS entirely (unset = use default "wt")
+    assert "$(cat "$test_dir/.config/gwt/config")" does_not_contain "GWT_ALIAS"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config no-fzf toggle on' {
+    local test_dir=$(mktemp -d)
+    mkdir -p "$test_dir/.config/gwt"
+    touch "$test_dir/.config/gwt/config"
+
+    # Select 4 (toggle fzf), then 7 (Done)
+    HOME="$test_dir" run _gwt_config <<< $'4\n7'
+
+    assert "$(cat "$test_dir/.config/gwt/config")" contains "GWT_NO_FZF=1"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config no-fzf toggle off' {
+    local test_dir=$(mktemp -d)
+    mkdir -p "$test_dir/.config/gwt"
+    echo 'GWT_NO_FZF=1' > "$test_dir/.config/gwt/config"
+
+    # Select 4 (toggle off), then 7 (Done)
+    HOME="$test_dir" run _gwt_config <<< $'4\n7'
+
+    assert "$(cat "$test_dir/.config/gwt/config")" does_not_contain "GWT_NO_FZF"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config post-create command set' {
+    local test_dir=$(mktemp -d)
+    mkdir -p "$test_dir/.config/gwt"
+    touch "$test_dir/.config/gwt/config"
+
+    # Select 5 (Post-create), 1 (set), enter "npm install", then 7 (Done)
+    HOME="$test_dir" run _gwt_config <<< $'5\n1\nnpm install\n7'
+
+    local result=$(_gwt_config_read_file "GWT_POST_CREATE_CMD" "$test_dir/.config/gwt/config")
+    assert "$result" same_as "npm install"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config post-create command clear' {
+    local test_dir=$(mktemp -d)
+    mkdir -p "$test_dir/.config/gwt"
+    echo 'GWT_POST_CREATE_CMD=npm install' > "$test_dir/.config/gwt/config"
+
+    # Select 5 (Post-create), 2 (clear), then 7 (Done)
+    HOME="$test_dir" run _gwt_config <<< $'5\n2\n7'
+
+    assert "$(cat "$test_dir/.config/gwt/config")" does_not_contain "GWT_POST_CREATE_CMD"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config scope toggle to local' {
+    create_test_repo
+    local test_home=$(mktemp -d)
+    mkdir -p "$test_home/.config/gwt"
+    touch "$test_home/.config/gwt/config"
+
+    # Select 6 (scope toggle to local), 2 (main branch), enter "staging", 7 (done)
+    cd "$REPO_DIR"
+    HOME="$test_home" run _gwt_config <<< $'6\n2\nstaging\n7'
+
+    # Should write to local .gwt/config, not global
+    local result=$(_gwt_config_read_file "GWT_MAIN_BRANCH" "$REPO_DIR/.gwt/config")
+    assert "$result" same_as "staging"
+    rm -rf "$test_home"
+    cleanup_test_repo
+}
+
+@test '_gwt_config copy-dirs sub-menu still works' {
+    local test_dir=$(mktemp -d)
+    mkdir -p "$test_dir/.config/gwt"
+    touch "$test_dir/.config/gwt/config"
+
+    # Select 1 (Copy dirs), 1 (add), enter "serena", 4 (back), 7 (done top)
+    HOME="$test_dir" run _gwt_config <<< $'1\n1\nserena\n4\n7'
+
+    local result=$(_gwt_config_read_file "GWT_COPY_DIRS" "$test_dir/.config/gwt/config")
+    assert "$result" same_as "serena"
+    rm -rf "$test_dir"
+}
+
+@test '_gwt_config shows current values' {
+    local test_dir=$(mktemp -d)
+    mkdir -p "$test_dir/.config/gwt"
+    cat > "$test_dir/.config/gwt/config" << 'EOF'
+GWT_MAIN_BRANCH=develop
+GWT_ALIAS=gw
+GWT_NO_FZF=1
+EOF
+
+    # Just open and close menu
+    HOME="$test_dir" run _gwt_config <<< $'7'
+
+    assert "$output" contains "develop"
+    assert "$output" contains "gw"
+    rm -rf "$test_dir"
+}
+
+# =============================================================================
+# Integration: _gwt_get_main_branch uses layered config
+# =============================================================================
+
+@test '_gwt_get_main_branch reads from global config file' {
+    create_test_repo
+    local test_home=$(mktemp -d)
+    mkdir -p "$test_home/.config/gwt"
+    echo 'GWT_MAIN_BRANCH=develop' > "$test_home/.config/gwt/config"
+
+    cd "$REPO_DIR"
+    unset GWT_MAIN_BRANCH
+    HOME="$test_home" run _gwt_get_main_branch
+
+    assert "$output" same_as "develop"
+    rm -rf "$test_home"
+    cleanup_test_repo
+}
+
+@test '_gwt_get_main_branch local config overrides global' {
+    create_test_repo
+    local test_home=$(mktemp -d)
+    mkdir -p "$test_home/.config/gwt"
+    echo 'GWT_MAIN_BRANCH=develop' > "$test_home/.config/gwt/config"
+
+    # Local repo config
+    mkdir -p "$REPO_DIR/.gwt"
+    echo 'GWT_MAIN_BRANCH=staging' > "$REPO_DIR/.gwt/config"
+
+    cd "$REPO_DIR"
+    unset GWT_MAIN_BRANCH
+    HOME="$test_home" run _gwt_get_main_branch
+
+    assert "$output" same_as "staging"
+    rm -rf "$test_home"
+    cleanup_test_repo
+}
+
+@test '_gwt_get_main_branch env var still wins over config files' {
+    create_test_repo
+    local test_home=$(mktemp -d)
+    mkdir -p "$test_home/.config/gwt"
+    echo 'GWT_MAIN_BRANCH=develop' > "$test_home/.config/gwt/config"
+
+    cd "$REPO_DIR"
+    GWT_MAIN_BRANCH=production HOME="$test_home" run _gwt_get_main_branch
+
+    assert "$output" same_as "production"
+    rm -rf "$test_home"
+    cleanup_test_repo
 }

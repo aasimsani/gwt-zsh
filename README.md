@@ -108,22 +108,36 @@ To disable fzf and use numbered menus instead:
 export GWT_NO_FZF=1
 ```
 
-### Environment Variables
+### Configuration
 
-```bash
-# Default base branch for new worktrees (default: "main")
-export GWT_MAIN_BRANCH="main"
+gwt uses a layered config system. Settings are resolved in priority order:
 
-# Directories to copy to new worktrees
-export GWT_COPY_DIRS=".vscode,.env"
+1. **Environment variables** (highest priority)
+2. **Local config** (`.gwt/config` in repo root — per-repo overrides)
+3. **Global config** (`~/.config/gwt/config` — user defaults)
+4. **Built-in defaults**
 
-# Alias for gwt command (default: "wt")
-# Set to "" to disable, or any string for a custom alias
-export GWT_ALIAS="wt"
+Run `gwt --config` to interactively configure all settings.
 
-# Disable fzf menus
-export GWT_NO_FZF=1
+**Config file format** (same for global and local):
 ```
+GWT_MAIN_BRANCH=develop
+GWT_COPY_DIRS=.vscode,.env
+GWT_ALIAS=wt
+# GWT_NO_FZF=1
+# GWT_POST_CREATE_CMD=npm install
+```
+
+**Environment variables** (override config files):
+```bash
+export GWT_MAIN_BRANCH="main"       # Default base branch (default: "main")
+export GWT_COPY_DIRS=".vscode,.env" # Directories to copy to new worktrees
+export GWT_ALIAS="wt"               # Alias for gwt command (default: "wt", "" to disable)
+export GWT_NO_FZF=1                 # Disable fzf menus
+export GWT_POST_CREATE_CMD="npm install"  # Command to run after worktree creation
+```
+
+> **Migration:** If you have `GWT_*` exports in `~/.zshrc`, gwt automatically migrates them to `~/.config/gwt/config` on first load. The old exports keep working but you'll see a deprecation notice until you remove them.
 
 By default, gwt creates a `wt` alias so you can use `wt` instead of `gwt`:
 ```bash
@@ -347,8 +361,8 @@ When creating worktrees, config files (`.vscode/`, `.serena/`, etc.) aren't auto
 # Interactive config menu
 gwt --config
 
-# Or set manually in ~/.zshrc
-export GWT_COPY_DIRS="serena,.vscode,scripts"
+# Or set in config file (~/.config/gwt/config)
+# GWT_COPY_DIRS=serena,.vscode,scripts
 
 # Copy specific dirs when creating worktree
 gwt --copy-config-dirs .vscode feature/my-branch
@@ -369,6 +383,23 @@ gwt --config
 gwt feature/new-feature
 # .vscode/ and .idea/ are automatically copied
 ```
+
+### Post-Create Hooks
+
+Run a command automatically after every worktree creation:
+
+```bash
+# Via config (gwt --config → Post-create command)
+# GWT_POST_CREATE_CMD=npm install
+
+# Or via a script in the repo
+mkdir -p .gwt
+echo '#!/bin/sh
+npm install' > .gwt/post-create.sh
+chmod +x .gwt/post-create.sh
+```
+
+The `.gwt/post-create.sh` script takes precedence over `GWT_POST_CREATE_CMD`. If the hook fails, worktree creation still succeeds (a warning is printed).
 
 ### AI Assistant Integration
 
@@ -402,7 +433,7 @@ gwt --help       # Show help
 | `gwt --info` | `gwt -i` | Show stack info |
 | `gwt --list` | | List all worktrees |
 | `gwt --prune` | | Interactive worktree cleanup |
-| `gwt --config` | | Configure copy directories |
+| `gwt --config` | | Configure all gwt settings |
 | `gwt --copy-config-dirs <dir>` | | Copy directory when creating worktree |
 | `gwt --list-copy-dirs` | | List configured directories |
 | `gwt --setup-skill` | `gwt --setup-ai` | Install Claude Code skill globally |

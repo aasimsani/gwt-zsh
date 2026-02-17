@@ -6,7 +6,7 @@
 #        gwt --version
 #
 # Options:
-#   --config                  Configure default directories to copy (interactive)
+#   --config                  Configure all gwt settings (interactive)
 #   --copy-config-dirs <dir>  Copy directory from repo root to worktree (repeatable)
 #   --list                    List worktrees for this repo
 #   --list-copy-dirs          List configured directories to copy
@@ -16,8 +16,15 @@
 #   --version                 Show version information
 #
 # Environment Variables:
+#   GWT_MAIN_BRANCH           Default base branch (default: "main")
 #   GWT_COPY_DIRS             Comma-separated list of directories to always copy
 #   GWT_ALIAS                 Alias for gwt command (default: "wt", set "" to disable)
+#   GWT_NO_FZF                Set to 1 to disable fzf menus
+#   GWT_POST_CREATE_CMD       Command to run after worktree creation
+#
+# Config Files (local overrides global, env vars override both):
+#   Global: ~/.config/gwt/config
+#   Local:  .gwt/config (per-repo)
 #
 # Examples:
 #   gwt aasim/eng-1045-allow-changing-user-types  -> ../repo-eng-1045
@@ -207,12 +214,9 @@ _gwt_validate_branch() {
 }
 
 # Get the configured main branch name (default: "main")
+# Uses layered config: env var > local .gwt/config > global ~/.config/gwt/config > "main"
 _gwt_get_main_branch() {
-    if [[ -n "$GWT_MAIN_BRANCH" ]]; then
-        echo "$GWT_MAIN_BRANCH"
-    else
-        echo "main"
-    fi
+    _gwt_config_resolve "GWT_MAIN_BRANCH" "main"
 }
 
 # Read GWT_MAIN_BRANCH from zshrc file
@@ -221,6 +225,153 @@ _gwt_config_read_main() {
     if [[ -f "$zshrc" ]]; then
         grep -E '^export GWT_MAIN_BRANCH=' "$zshrc" 2>/dev/null | sed 's/^export GWT_MAIN_BRANCH="//' | sed 's/"$//'
     fi
+}
+
+# =============================================================================
+# Layered Config System (global + local config files)
+# =============================================================================
+
+# Read a key from a config file (KEY=VALUE format, supports # comments)
+_gwt_config_read_file() {
+    local key="$1"
+    local config_file="$2"
+
+    [[ ! -f "$config_file" ]] && return 0
+
+    local line value
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        # Skip comments and blank lines
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "$line" ]] && continue
+
+        # Match KEY=VALUE (with optional quotes)
+        if [[ "$line" =~ ^${key}=(.*) ]]; then
+            value="${match[1]}"
+            # Strip surrounding quotes if present
+            value="${value#\"}"
+            value="${value%\"}"
+            value="${value#\'}"
+            value="${value%\'}"
+            echo "$value"
+            return 0
+        fi
+    done < "$config_file"
+}
+
+# Write a key to a config file (creates parent dirs if needed)
+# Use --keep-empty flag to write KEY= instead of removing the key
+_gwt_config_write_file() {
+    local key="$1"
+    local value="$2"
+    local config_file="$3"
+    local keep_empty=false
+
+    if [[ "$4" == "--keep-empty" ]]; then
+        keep_empty=true
+    fi
+
+    # Security: Sanitize value - remove backticks and dollar signs
+    value=$(echo "$value" | tr -d '`$\\')
+
+    # Create parent directories if needed
+    local parent_dir="${config_file:h}"
+    [[ ! -d "$parent_dir" ]] && mkdir -p "$parent_dir"
+
+    # Create file if it doesn't exist
+    [[ ! -f "$config_file" ]] && touch "$config_file"
+
+    # Remove existing key line
+    if grep -q "^${key}=" "$config_file" 2>/dev/null; then
+        local grep_exit=0
+        grep -v "^${key}=" "$config_file" > "$config_file.tmp" 2>/dev/null || grep_exit=$?
+        if [[ $grep_exit -le 1 ]]; then
+            mv "$config_file.tmp" "$config_file"
+        else
+            rm -f "$config_file.tmp"
+            return 1
+        fi
+    fi
+
+    # Add new line
+    if [[ -n "$value" ]]; then
+        echo "${key}=${value}" >> "$config_file"
+    elif $keep_empty; then
+        echo "${key}=" >> "$config_file"
+    fi
+}
+
+# Resolve a config value with layered priority: env > local > global > default
+_gwt_config_resolve() {
+    local key="$1"
+    local default="$2"
+
+    # 1. Environment variable (highest priority)
+    local env_val="${(P)key}"
+    if [[ -n "$env_val" ]]; then
+        echo "$env_val"
+        return 0
+    fi
+
+    # 2. Local .gwt/config (per-repo)
+    local repo_root
+    repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
+    if [[ -n "$repo_root" && -f "$repo_root/.gwt/config" ]]; then
+        local local_val
+        local_val=$(_gwt_config_read_file "$key" "$repo_root/.gwt/config")
+        if [[ -n "$local_val" ]]; then
+            echo "$local_val"
+            return 0
+        fi
+    fi
+
+    # 3. Global config (~/.config/gwt/config)
+    local global_config="${XDG_CONFIG_HOME:-$HOME/.config}/gwt/config"
+    if [[ -f "$global_config" ]]; then
+        local global_val
+        global_val=$(_gwt_config_read_file "$key" "$global_config")
+        if [[ -n "$global_val" ]]; then
+            echo "$global_val"
+            return 0
+        fi
+    fi
+
+    # 4. Default
+    echo "$default"
+}
+
+# Auto-migrate GWT_* settings from ~/.zshrc to ~/.config/gwt/config
+_gwt_migrate_config() {
+    local zshrc="$HOME/.zshrc"
+    local global_config="${XDG_CONFIG_HOME:-$HOME/.config}/gwt/config"
+
+    # Skip if no zshrc
+    [[ ! -f "$zshrc" ]] && return 0
+
+    # Skip if no GWT_* exports in zshrc
+    grep -q '^export GWT_' "$zshrc" 2>/dev/null || return 0
+
+    # Skip if global config already exists (don't overwrite)
+    if [[ -f "$global_config" ]]; then
+        # Still show deprecation warning if zshrc has GWT vars
+        print -P "%F{yellow}gwt:%f you can now remove GWT_* exports from ~/.zshrc (deprecated)"
+        return 0
+    fi
+
+    # Create global config directory
+    mkdir -p "${global_config:h}"
+
+    # Extract and migrate each GWT_* export
+    local line key value
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^export\ (GWT_[A-Z_]+)=\"(.*)\"$ ]]; then
+            key="${match[1]}"
+            value="${match[2]}"
+            echo "${key}=${value}" >> "$global_config"
+        fi
+    done < <(grep '^export GWT_' "$zshrc")
+
+    print -P "%F{yellow}gwt:%f migrated settings to ~/.config/gwt/config"
+    print -P "%F{yellow}gwt:%f you can now remove GWT_* exports from ~/.zshrc (deprecated)"
 }
 
 # =============================================================================
@@ -515,12 +666,16 @@ _gwt_prune_cascade() {
     fi
 }
 
-# Read GWT_COPY_DIRS from zshrc file
+# Read GWT_COPY_DIRS (backward compat — delegates to layered config or reads from zshrc)
 _gwt_config_read() {
-    local zshrc="${1:-$HOME/.zshrc}"
-    if [[ -f "$zshrc" ]]; then
+    local zshrc="${1:-}"
+    # If explicit path given (tests), read from that file directly
+    if [[ -n "$zshrc" && -f "$zshrc" ]]; then
         grep -E '^export GWT_COPY_DIRS=' "$zshrc" 2>/dev/null | sed 's/^export GWT_COPY_DIRS="//' | sed 's/"$//'
+        return
     fi
+    # Otherwise use layered config
+    _gwt_config_resolve "GWT_COPY_DIRS" ""
 }
 
 # Write GWT_COPY_DIRS to zshrc file (with sanitization)
@@ -574,40 +729,23 @@ _gwt_config_write() {
     fi
 }
 
-# Interactive config menu
-_gwt_config() {
-    local zshrc="$HOME/.zshrc"
-
-    # Handle --help flag
-    if [[ "$1" == "--help" || "$1" == "-h" ]]; then
-        echo "gwt --config - Configure default directories to copy to worktrees"
-        echo ""
-        echo "Usage: gwt --config"
-        echo ""
-        echo "Opens an interactive menu to add/remove directories."
-        echo "Configuration is saved to ~/.zshrc as GWT_COPY_DIRS."
-        return 0
-    fi
-
-    local use_fzf=false
-    if [[ -z "$GWT_NO_FZF" ]] && command -v fzf &> /dev/null && [[ -t 0 ]]; then
-        use_fzf=true
-    fi
+# Interactive config sub-menu for copy directories
+_gwt_config_copy_dirs() {
+    local config_file="$1"
 
     while true; do
-        local current=$(_gwt_config_read "$zshrc")
+        local current=$(_gwt_config_read_file "GWT_COPY_DIRS" "$config_file")
         local choice=""
 
-        if $use_fzf; then
-            # fzf menu
-            local header="GWT Config"
-            if [[ -n "$current" ]]; then
-                header="GWT Config ─ Current: $current"
-            else
-                header="GWT Config ─ No directories configured"
-            fi
+        local use_fzf=false
+        if [[ -z "$GWT_NO_FZF" ]] && command -v fzf &> /dev/null && [[ -t 0 ]]; then
+            use_fzf=true
+        fi
 
-            local -a actions=("● Add directory" "● Remove directory" "● List directories" "● Done")
+        if $use_fzf; then
+            local header="Copy Directories"
+            [[ -n "$current" ]] && header="Copy Directories ─ Current: $current"
+            local -a actions=("● Add directory" "● Remove directory" "● List directories" "● Back")
             choice=$(printf '%s\n' "${actions[@]}" | fzf \
                 --header="$header" \
                 --prompt="❯ " \
@@ -616,15 +754,12 @@ _gwt_config() {
                 --reverse \
                 --height=40% \
                 --no-multi)
-
-            # Extract action from selection
             choice="${choice#● }"
         else
-            # Fallback numbered menu
             echo ""
-            echo "=== GWT Config ==="
+            echo "--- Copy Directories ---"
             if [[ -n "$current" ]]; then
-                echo "Current directories: $current"
+                echo "Current: $current"
             else
                 echo "No directories configured"
             fi
@@ -632,17 +767,15 @@ _gwt_config() {
             echo "1) Add directory"
             echo "2) Remove directory"
             echo "3) List directories"
-            echo "4) Done"
+            echo "4) Back"
             echo ""
             printf "Choice [1-4]: "
             read choice
-
-            # Map numbers to actions
             case "$choice" in
                 1) choice="Add directory" ;;
                 2) choice="Remove directory" ;;
                 3) choice="List directories" ;;
-                4|"") choice="Done" ;;
+                4|"") choice="Back" ;;
             esac
         fi
 
@@ -651,21 +784,19 @@ _gwt_config() {
                 print -Pn "  %F{cyan}❯%f Directory to add: "
                 read new_dir
                 if [[ -n "$new_dir" ]]; then
-                    # Security: Validate directory name
                     if ! _gwt_validate_dir "$new_dir"; then
                         continue
                     fi
                     if [[ -n "$current" ]]; then
-                        # Check if already exists
                         if [[ ",$current," == *",$new_dir,"* ]]; then
                             print -P "  %F{yellow}Directory '$new_dir' already configured%f"
                         else
-                            _gwt_config_write "$zshrc" "$current,$new_dir"
+                            _gwt_config_write_file "GWT_COPY_DIRS" "$current,$new_dir" "$config_file"
                             export GWT_COPY_DIRS="$current,$new_dir"
                             print -P "  %F{green}✓%f Added '$new_dir'"
                         fi
                     else
-                        _gwt_config_write "$zshrc" "$new_dir"
+                        _gwt_config_write_file "GWT_COPY_DIRS" "$new_dir" "$config_file"
                         export GWT_COPY_DIRS="$new_dir"
                         print -P "  %F{green}✓%f Added '$new_dir'"
                     fi
@@ -676,39 +807,33 @@ _gwt_config() {
                     print -P "  %F{240}No directories to remove%f"
                 else
                     if $use_fzf; then
-                        # fzf multi-select for removal
                         local -a dirs_array
                         IFS=',' read -rA dirs_array <<< "$current"
-
                         local selected=$(printf '%s\n' "${dirs_array[@]}" | fzf --multi \
-                            --header="Select directories to remove (TAB to select, ENTER to confirm)" \
+                            --header="Select directories to remove" \
                             --prompt="❯ " \
                             --pointer="▶" \
                             --marker="✓" \
                             --color="prompt:cyan,pointer:green,marker:green,header:dim" \
                             --reverse \
                             --height=50%)
-
                         if [[ -n "$selected" ]]; then
                             local new_list="$current"
                             while IFS= read -r rem_dir; do
-                                # Security: Escape all regex special characters
                                 local escaped_dir=$(printf '%s' "$rem_dir" | sed 's/[[\.*^$/+?{}()|]/\\&/g')
                                 new_list=$(echo "$new_list" | tr ',' '\n' | grep -v "^${escaped_dir}$" | tr '\n' ',' | sed 's/,$//')
                                 print -P "  %F{green}✓%f Removed '$rem_dir'"
                             done <<< "$selected"
-                            _gwt_config_write "$zshrc" "$new_list"
+                            _gwt_config_write_file "GWT_COPY_DIRS" "$new_list" "$config_file"
                             export GWT_COPY_DIRS="$new_list"
                         fi
                     else
-                        # Fallback text input
                         printf "Directory to remove: "
                         read rem_dir
                         if [[ -n "$rem_dir" ]]; then
-                            # Security: Escape all regex special characters
                             local escaped_dir=$(printf '%s' "$rem_dir" | sed 's/[[\.*^$/+?{}()|]/\\&/g')
                             local new_list=$(echo "$current" | tr ',' '\n' | grep -v "^${escaped_dir}$" | tr '\n' ',' | sed 's/,$//')
-                            _gwt_config_write "$zshrc" "$new_list"
+                            _gwt_config_write_file "GWT_COPY_DIRS" "$new_list" "$config_file"
                             export GWT_COPY_DIRS="$new_list"
                             echo "Removed '$rem_dir'"
                         fi
@@ -725,8 +850,268 @@ _gwt_config() {
                     print -P "  %F{240}No directories configured%f"
                 fi
                 ;;
+            "Back"|"")
+                return 0
+                ;;
+            *)
+                print -P "  %F{red}Invalid choice%f"
+                ;;
+        esac
+    done
+}
+
+# Config sub-menu for main branch
+_gwt_config_main_branch() {
+    local config_file="$1"
+    local current=$(_gwt_config_read_file "GWT_MAIN_BRANCH" "$config_file")
+    print -P "  %F{240}Current main branch: ${current:-main (default)}%f"
+    print -Pn "  %F{cyan}❯%f New main branch (empty to reset to default): "
+    read new_branch
+    if [[ -z "$new_branch" ]]; then
+        _gwt_config_write_file "GWT_MAIN_BRANCH" "" "$config_file"
+        unset GWT_MAIN_BRANCH
+        print -P "  %F{green}✓%f Reset to default (main)"
+    elif [[ "$new_branch" =~ [[:space:]] || "$new_branch" =~ [\~\^:\\\*\?\[] ]]; then
+        print -P "  %F{red}Invalid branch name%f - no spaces or special characters allowed"
+    else
+        _gwt_config_write_file "GWT_MAIN_BRANCH" "$new_branch" "$config_file"
+        export GWT_MAIN_BRANCH="$new_branch"
+        print -P "  %F{green}✓%f Main branch set to '$new_branch'"
+    fi
+}
+
+# Config sub-menu for alias
+_gwt_config_alias() {
+    local config_file="$1"
+    local current=$(_gwt_config_read_file "GWT_ALIAS" "$config_file")
+    local has_key=false
+    grep -q '^GWT_ALIAS=' "$config_file" 2>/dev/null && has_key=true
+
+    if $has_key; then
+        if [[ -n "$current" ]]; then
+            print -P "  %F{240}Current alias: $current%f"
+        else
+            print -P "  %F{240}Alias: disabled%f"
+        fi
+    else
+        print -P "  %F{240}Current alias: wt (default)%f"
+    fi
+
+    echo "  1) Set custom alias"
+    echo "  2) Disable alias"
+    echo "  3) Reset to default (wt)"
+    printf "  Choice [1-3]: "
+    read sub_choice
+
+    case "$sub_choice" in
+        1)
+            print -Pn "  %F{cyan}❯%f New alias: "
+            read new_alias
+            if [[ -n "$new_alias" && ! "$new_alias" =~ [[:space:]] ]]; then
+                _gwt_config_write_file "GWT_ALIAS" "$new_alias" "$config_file"
+                export GWT_ALIAS="$new_alias"
+                print -P "  %F{green}✓%f Alias set to '$new_alias' (restart shell to apply)"
+            else
+                print -P "  %F{red}Invalid alias%f"
+            fi
+            ;;
+        2)
+            # Write empty value explicitly (GWT_ALIAS= means "no alias")
+            _gwt_config_write_file "GWT_ALIAS" "" "$config_file" --keep-empty
+            export GWT_ALIAS=""
+            print -P "  %F{green}✓%f Alias disabled (restart shell to apply)"
+            ;;
+        3)
+            # Remove the key entirely (unset = use default "wt")
+            _gwt_config_write_file "GWT_ALIAS" "" "$config_file"
+            unset GWT_ALIAS
+            print -P "  %F{green}✓%f Reset to default (wt, restart shell to apply)"
+            ;;
+    esac
+}
+
+# Config toggle for fzf
+_gwt_config_nofzf() {
+    local config_file="$1"
+    local current=$(_gwt_config_read_file "GWT_NO_FZF" "$config_file")
+    if [[ -n "$current" ]]; then
+        _gwt_config_write_file "GWT_NO_FZF" "" "$config_file"
+        unset GWT_NO_FZF
+        print -P "  %F{green}✓%f fzf menus enabled"
+    else
+        _gwt_config_write_file "GWT_NO_FZF" "1" "$config_file"
+        export GWT_NO_FZF=1
+        print -P "  %F{green}✓%f fzf menus disabled"
+    fi
+}
+
+# Config sub-menu for post-create command
+_gwt_config_postcmd() {
+    local config_file="$1"
+    local current=$(_gwt_config_read_file "GWT_POST_CREATE_CMD" "$config_file")
+    print -P "  %F{240}Current: ${current:-(none)}%f"
+    print -P "  %F{240}Note: .gwt/post-create.sh script takes precedence over this setting%f"
+
+    echo "  1) Set command"
+    echo "  2) Clear command"
+    printf "  Choice [1-2]: "
+    read sub_choice
+
+    case "$sub_choice" in
+        1)
+            print -Pn "  %F{cyan}❯%f Post-create command: "
+            read new_cmd
+            if [[ -n "$new_cmd" ]]; then
+                _gwt_config_write_file "GWT_POST_CREATE_CMD" "$new_cmd" "$config_file"
+                export GWT_POST_CREATE_CMD="$new_cmd"
+                print -P "  %F{green}✓%f Post-create command set"
+            fi
+            ;;
+        2)
+            _gwt_config_write_file "GWT_POST_CREATE_CMD" "" "$config_file"
+            unset GWT_POST_CREATE_CMD
+            print -P "  %F{green}✓%f Post-create command cleared"
+            ;;
+    esac
+}
+
+# Interactive config menu (top-level)
+_gwt_config() {
+    # Handle --help flag
+    if [[ "$1" == "--help" || "$1" == "-h" ]]; then
+        echo "gwt --config - Configure gwt settings"
+        echo ""
+        echo "Usage: gwt --config"
+        echo ""
+        echo "Opens an interactive menu to configure all gwt settings."
+        echo ""
+        echo "Settings:"
+        echo "  Copy directories     Directories to auto-copy to new worktrees"
+        echo "  Main branch          Default base branch for new worktrees"
+        echo "  Command alias        Alias for the gwt command"
+        echo "  Disable fzf menus    Toggle fzf interactive menus"
+        echo "  Post-create command  Command to run after creating a worktree"
+        echo ""
+        echo "Config files:"
+        echo "  Global: ~/.config/gwt/config"
+        echo "  Local:  .gwt/config (per-repo, overrides global)"
+        return 0
+    fi
+
+    local global_config="${XDG_CONFIG_HOME:-$HOME/.config}/gwt/config"
+    local scope="global"
+    local config_file="$global_config"
+
+    # Ensure global config dir exists
+    mkdir -p "${global_config:h}"
+    [[ ! -f "$global_config" ]] && touch "$global_config"
+
+    while true; do
+        # Re-evaluate fzf each iteration (may have been toggled)
+        local use_fzf=false
+        if [[ -z "$GWT_NO_FZF" ]] && command -v fzf &> /dev/null && [[ -t 0 ]]; then
+            use_fzf=true
+        fi
+
+        # Determine active config file based on scope
+        if [[ "$scope" == "local" ]]; then
+            local repo_root
+            repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
+            if [[ -n "$repo_root" ]]; then
+                config_file="$repo_root/.gwt/config"
+                mkdir -p "$repo_root/.gwt"
+                [[ ! -f "$config_file" ]] && touch "$config_file"
+            else
+                print -P "  %F{red}Not in a git repo — cannot use local scope%f"
+                scope="global"
+                config_file="$global_config"
+            fi
+        else
+            config_file="$global_config"
+        fi
+
+        # Read current values for display
+        local cur_dirs=$(_gwt_config_read_file "GWT_COPY_DIRS" "$config_file")
+        local cur_main=$(_gwt_config_read_file "GWT_MAIN_BRANCH" "$config_file")
+        local cur_alias=$(_gwt_config_read_file "GWT_ALIAS" "$config_file")
+        local cur_nofzf=$(_gwt_config_read_file "GWT_NO_FZF" "$config_file")
+        local cur_postcmd=$(_gwt_config_read_file "GWT_POST_CREATE_CMD" "$config_file")
+
+        local choice=""
+
+        if $use_fzf; then
+            local -a actions=(
+                "● Copy directories    ${cur_dirs:+(${cur_dirs})}"
+                "● Main branch         ${cur_main:+(${cur_main})}${cur_main:+}${cur_main:-  (main)}"
+                "● Command alias       ${cur_alias:+(${cur_alias})}${cur_alias:+}${cur_alias:-  (wt)}"
+                "● Disable fzf menus   ${cur_nofzf:+(on)}${cur_nofzf:+}${cur_nofzf:-  (off)}"
+                "● Post-create command ${cur_postcmd:+(${cur_postcmd})}${cur_postcmd:+}${cur_postcmd:-  (none)}"
+                "● Settings scope      → $scope"
+                "● Done"
+            )
+            choice=$(printf '%s\n' "${actions[@]}" | fzf \
+                --header="GWT Config [$scope]" \
+                --prompt="❯ " \
+                --pointer="▶" \
+                --color="prompt:cyan,pointer:green,header:dim" \
+                --reverse \
+                --height=40% \
+                --no-multi)
+            choice="${choice#● }"
+            choice="${choice%%  *}"
+        else
+            echo ""
+            echo "=== GWT Config [$scope] ==="
+            echo ""
+            echo "1) Copy directories    ${cur_dirs:-(none)}"
+            echo "2) Main branch         ${cur_main:-main}"
+            echo "3) Command alias       ${cur_alias:-wt}"
+            echo "4) Disable fzf menus   ${cur_nofzf:+on}${cur_nofzf:-off}"
+            echo "5) Post-create command ${cur_postcmd:-(none)}"
+            echo "6) Settings scope      → $scope"
+            echo "7) Done"
+            echo ""
+            printf "Choice [1-7]: "
+            read choice
+
+            case "$choice" in
+                1) choice="Copy directories" ;;
+                2) choice="Main branch" ;;
+                3) choice="Command alias" ;;
+                4) choice="Disable fzf" ;;
+                5) choice="Post-create" ;;
+                6) choice="Settings scope" ;;
+                7|"") choice="Done" ;;
+            esac
+        fi
+
+        case "$choice" in
+            Copy*)
+                _gwt_config_copy_dirs "$config_file"
+                ;;
+            Main*)
+                _gwt_config_main_branch "$config_file"
+                ;;
+            Command*)
+                _gwt_config_alias "$config_file"
+                ;;
+            Disable*)
+                _gwt_config_nofzf "$config_file"
+                ;;
+            Post*)
+                _gwt_config_postcmd "$config_file"
+                ;;
+            Settings*)
+                if [[ "$scope" == "global" ]]; then
+                    scope="local"
+                    print -P "  %F{green}✓%f Scope set to local (.gwt/config)"
+                else
+                    scope="global"
+                    print -P "  %F{green}✓%f Scope set to global (~/.config/gwt/config)"
+                fi
+                ;;
             "Done"|"")
-                print -P "  %F{green}✓%f Configuration saved to ~/.zshrc"
+                print -P "  %F{green}✓%f Configuration saved"
                 return 0
                 ;;
             *)
@@ -1004,6 +1389,11 @@ Environment Variables:
   GWT_COPY_DIRS             Comma-separated list of directories to always copy
   GWT_ALIAS                 Alias for gwt command (default: "wt", set "" to disable)
   GWT_NO_FZF                Set to 1 to disable fzf menus (use numbered fallback)
+  GWT_POST_CREATE_CMD       Command to run after worktree creation (e.g. "npm install")
+
+Config Files (local overrides global, env vars override both):
+  Global: ~/.config/gwt/config
+  Local:  .gwt/config (per-repo)
 
 Examples:
   gwt feature/new-feature        Create worktree from main branch
@@ -1016,7 +1406,7 @@ Examples:
   gwt --info                     Show current worktree's stack relationships
   gwt --list                     List all worktrees (shows hierarchy)
   gwt --prune                    Remove old worktrees (warns about dependents)
-  gwt --config                   Configure directories to copy interactively
+  gwt --config                   Configure all gwt settings interactively
 HELP
             return 0
             ;;
@@ -1209,9 +1599,10 @@ HELP
         fi
     fi
 
-    # Add dirs from GWT_COPY_DIRS env var (with validation)
-    if [[ -n "$GWT_COPY_DIRS" ]]; then
-        IFS=',' read -rA env_dirs <<< "$GWT_COPY_DIRS"
+    # Add dirs from config (env var > local > global)
+    local resolved_copy_dirs=$(_gwt_config_resolve "GWT_COPY_DIRS" "")
+    if [[ -n "$resolved_copy_dirs" ]]; then
+        IFS=',' read -rA env_dirs <<< "$resolved_copy_dirs"
         for env_dir in "${env_dirs[@]}"; do
             if _gwt_validate_dir "$env_dir" 2>/dev/null; then
                 copy_dirs+=("$env_dir")
@@ -1224,7 +1615,7 @@ HELP
         echo "       gwt --config | --list | --prune | --update | --version"
         echo ""
         echo "Options:"
-        echo "  --config                  Configure default directories to copy"
+        echo "  --config                  Configure all gwt settings"
         echo "  --copy-config-dirs <dir>  Copy directory to worktree (repeatable)"
         echo "  --list                    List worktrees for this repo"
         echo "  --list-copy-dirs          List configured directories to copy"
@@ -1363,6 +1754,9 @@ HELP
         return 1
     fi
 }
+
+# Auto-migrate settings from ~/.zshrc to ~/.config/gwt/config on plugin load
+_gwt_migrate_config
 
 # Configurable alias (default: wt)
 # Set GWT_ALIAS="" to disable, or GWT_ALIAS=myalias for custom
