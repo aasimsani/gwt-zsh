@@ -45,7 +45,12 @@ Also works with: Antigen, Zplug, Zinit, Zgenom.
 
 - `GWT_MAIN_BRANCH`: Default base branch (default: "main")
 - `GWT_COPY_DIRS`: Comma-separated directories to copy to new worktrees
+- `GWT_ALIAS`: Command alias (default: "wt", set "" to disable)
 - `GWT_NO_FZF`: Set to 1 to disable fzf menus
+- `GWT_POST_CREATE_CMD`: Command to run after worktree creation
+
+Config files: `~/.config/gwt/config` (global), `.gwt/config` (local per-repo).
+Local overrides global; env vars override both.
 
 ## Architecture
 

@@ -80,7 +80,12 @@ export GWT_COPY_DIRS=".vscode,.env"  # Or set in .zshrc
 |----------|---------|-------------|
 | `GWT_MAIN_BRANCH` | `main` | Default base branch for new worktrees |
 | `GWT_COPY_DIRS` | (empty) | Comma-separated directories to auto-copy |
+| `GWT_ALIAS` | `wt` | Command alias (`""` to disable) |
 | `GWT_NO_FZF` | (unset) | Set to `1` to disable fzf menus |
+| `GWT_POST_CREATE_CMD` | (empty) | Command to run after worktree creation |
+
+Config files: `~/.config/gwt/config` (global), `.gwt/config` (local per-repo).
+Local overrides global; env vars override both.
 
 ## Architecture
 

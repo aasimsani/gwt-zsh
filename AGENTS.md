@@ -105,10 +105,16 @@ git config core.hooksPath .githooks
 ### Environment Variables
 
 ```bash
-export GWT_MAIN_BRANCH="main"       # Default base branch
-export GWT_COPY_DIRS=".vscode,.env" # Auto-copy directories
-export GWT_NO_FZF=1                 # Disable fzf menus
+export GWT_MAIN_BRANCH="main"              # Default base branch
+export GWT_COPY_DIRS=".vscode,.env"        # Auto-copy directories
+export GWT_ALIAS="wt"                      # Command alias (default: "wt", "" to disable)
+export GWT_NO_FZF=1                        # Disable fzf menus
+export GWT_POST_CREATE_CMD="npm install"   # Run after worktree creation
 ```
+
+Config files (local overrides global, env vars override both):
+- Global: `~/.config/gwt/config`
+- Local: `.gwt/config` (per-repo)
 
 ## Coding Conventions
 
