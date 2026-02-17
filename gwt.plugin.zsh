@@ -237,6 +237,20 @@ _gwt_metadata_set() {
     # Enable worktree-specific config
     git config extensions.worktreeConfig true 2>/dev/null
 
+    # Ensure core.bare=false in this worktree's config.worktree
+    # Protects against config.worktree deletion leaking core.bare=true from shared config
+    git config --worktree core.bare false 2>/dev/null
+
+    # Also protect the main worktree's config.worktree
+    local git_common_dir=$(git rev-parse --git-common-dir 2>/dev/null)
+    if [[ -n "$git_common_dir" && "$git_common_dir" != ".git" ]]; then
+        local main_config_worktree="$git_common_dir/config.worktree"
+        if [[ ! -f "$main_config_worktree" ]]; then
+            echo "[core]" > "$main_config_worktree"
+            echo "	bare = false" >> "$main_config_worktree"
+        fi
+    fi
+
     # Store metadata in worktree-local config
     git config --worktree gwt.baseBranch "$base_branch"
     git config --worktree gwt.baseWorktreePath "$base_path"
@@ -253,6 +267,24 @@ _gwt_metadata_get() {
 _gwt_metadata_clear() {
     git config --worktree --unset gwt.baseBranch 2>/dev/null
     git config --worktree --unset gwt.baseWorktreePath 2>/dev/null
+}
+
+# Check and repair missing config.worktree when extensions.worktreeConfig is enabled
+# Prevents core.bare=true leak from shared config after config.worktree deletion
+_gwt_health_check() {
+    # Only check if extensions.worktreeConfig is enabled
+    local wt_config=$(git config extensions.worktreeConfig 2>/dev/null)
+    [[ "$wt_config" != "true" ]] && return 0
+
+    # Determine the config.worktree path for current worktree
+    local git_dir=$(git rev-parse --git-dir 2>/dev/null) || return 0
+    local config_worktree="$git_dir/config.worktree"
+
+    if [[ ! -f "$config_worktree" ]]; then
+        # Recreate with core.bare=false to prevent bare repo leak
+        git config --worktree core.bare false 2>/dev/null
+        print -P "%F{yellow}gwt:%f repaired missing config.worktree (set core.bare=false)"
+    fi
 }
 
 # =============================================================================
@@ -962,6 +994,7 @@ Worktree Management:
 
 Other Options:
   --setup-skill, --setup-ai Install Claude Code skill globally (~/.claude/skills/)
+  --repair                  Fix broken worktree config (core.bare leak)
   --update                  Update gwt to the latest version
   --version                 Show version information
   --help, -h                Show this help message
@@ -1002,6 +1035,10 @@ HELP
             ;;
         --setup-skill|--setup-ai)
             _gwt_setup_skill
+            return $?
+            ;;
+        --repair)
+            _gwt_health_check
             return $?
             ;;
         --list)
@@ -1192,6 +1229,7 @@ HELP
         echo "  --list                    List worktrees for this repo"
         echo "  --list-copy-dirs          List configured directories to copy"
         echo "  --prune                   Interactive worktree pruning"
+        echo "  --repair                  Fix broken worktree config (core.bare leak)"
         echo "  --update                  Update gwt to the latest version"
         echo "  --version                 Show version information"
         echo ""

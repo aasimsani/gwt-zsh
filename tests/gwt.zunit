@@ -2674,3 +2674,110 @@ HOOKEOF
 
     assert "$output" contains "GWT_ALIAS"
 }
+
+# =============================================================================
+# Worktree Config Defense Tests (core.bare leak protection)
+# =============================================================================
+
+@test '_gwt_metadata_set writes core.bare=false to worktree config' {
+    create_test_repo
+    local worktree_path="$PARENT_DIR/test-repo-eng-defense-1"
+    git worktree add -q -b test/eng-defense-1 "$worktree_path" HEAD
+    cd "$worktree_path"
+
+    _gwt_metadata_set "feature/parent" "$REPO_DIR"
+
+    local bare=$(git config --worktree core.bare 2>/dev/null)
+    assert "$bare" same_as "false"
+    cleanup_test_repo
+}
+
+@test '_gwt_metadata_set protects main worktree config.worktree' {
+    create_test_repo
+    local worktree_path="$PARENT_DIR/test-repo-eng-defense-2"
+    git worktree add -q -b test/eng-defense-2 "$worktree_path" HEAD
+    cd "$worktree_path"
+
+    _gwt_metadata_set "feature/parent" "$REPO_DIR"
+
+    # Main worktree's config.worktree should exist with core.bare=false
+    local main_git_dir="$REPO_DIR/.git"
+    assert "$main_git_dir/config.worktree" is_file
+    local main_bare=$(cd "$REPO_DIR" && git config --worktree core.bare 2>/dev/null)
+    assert "$main_bare" same_as "false"
+    cleanup_test_repo
+}
+
+@test '_gwt_health_check repairs missing config.worktree' {
+    create_test_repo
+    local worktree_path="$PARENT_DIR/test-repo-eng-defense-3"
+    git worktree add -q -b test/eng-defense-3 "$worktree_path" HEAD
+    cd "$worktree_path"
+
+    # Set up worktreeConfig then delete config.worktree to simulate the bug
+    git config extensions.worktreeConfig true
+    local git_dir=$(git rev-parse --git-dir)
+    rm -f "$git_dir/config.worktree"
+
+    run _gwt_health_check
+
+    assert $state equals 0
+    assert "$git_dir/config.worktree" is_file
+    assert "$output" contains "repaired"
+    cleanup_test_repo
+}
+
+@test '_gwt_health_check is no-op when worktreeConfig not enabled' {
+    create_test_repo
+
+    run _gwt_health_check
+
+    assert $state equals 0
+    assert "$output" is_empty
+    cleanup_test_repo
+}
+
+@test '_gwt_health_check is no-op when config.worktree exists' {
+    create_test_repo
+    local worktree_path="$PARENT_DIR/test-repo-eng-defense-4"
+    git worktree add -q -b test/eng-defense-4 "$worktree_path" HEAD
+    cd "$worktree_path"
+
+    # Set up worktreeConfig properly (config.worktree will exist)
+    _gwt_metadata_set "feature/parent" "$REPO_DIR"
+
+    run _gwt_health_check
+
+    assert $state equals 0
+    assert "$output" is_empty
+    cleanup_test_repo
+}
+
+@test 'gwt --repair fixes broken config.worktree' {
+    create_test_repo
+    git config extensions.worktreeConfig true
+    # Delete the main worktree's config.worktree
+    rm -f "$REPO_DIR/.git/config.worktree"
+
+    run gwt --repair
+
+    assert $state equals 0
+    assert "$output" contains "repaired"
+    assert "$REPO_DIR/.git/config.worktree" is_file
+    cleanup_test_repo
+}
+
+@test 'gwt --repair is safe when nothing is broken' {
+    create_test_repo
+
+    run gwt --repair
+
+    assert $state equals 0
+    cleanup_test_repo
+}
+
+@test 'gwt --help mentions --repair' {
+    run gwt --help
+
+    assert "$output" contains "repair"
+}
