@@ -14,6 +14,7 @@ Stop typing `git worktree add ../myrepo-feature ../myrepo-feature feature/branch
 - **Interactive Pruning** - Clean up old worktrees with fzf multi-select (dependency-aware)
 - **List Worktrees** - See all worktrees at a glance with hierarchy indicators
 - **Copy Config Dirs** - Automatically copy `.vscode/`, `.env`, etc. to new worktrees
+- **Tab Completion** - Full zsh autocompletion for all commands, flags, branches, and worktree names
 - **fzf Integration** - Fuzzy-searchable menus (with fallback for non-fzf setups)
 
 ## Quick Start
@@ -402,6 +403,25 @@ chmod +x .gwt/post-create.sh
 ```
 
 The `.gwt/post-create.sh` script takes precedence over `GWT_POST_CREATE_CMD`. If the hook fails, worktree creation still succeeds (a warning is printed).
+
+### Tab Completion
+
+gwt includes full zsh tab completion out of the box. Just press `<TAB>` and it works:
+
+```bash
+gwt --<TAB>          # All flags with descriptions
+gwt --from <TAB>     # Local + remote branch names
+gwt <TAB>            # Branch names, worktree names, and navigation shortcuts (.., ...)
+```
+
+Completions are registered automatically for both `gwt` and its alias (default: `wt`). No extra setup required — if your shell has `compinit` loaded (standard for oh-my-zsh and most zsh setups), completions are available immediately after installation.
+
+**What gets completed:**
+- All flags (`--stack`, `--from`, `--list`, `--prune`, etc.) with descriptions
+- Branch names (local and remote, deduplicated) for `--from` and positional arguments
+- Existing worktree branch names for quick navigation
+- Navigation shorthands (`..` for parent, `...` for root)
+- Directory paths for `--copy-config-dirs`
 
 ### AI Assistant Integration
 
