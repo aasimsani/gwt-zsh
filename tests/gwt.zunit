@@ -3263,3 +3263,375 @@ EOF
     rm -rf "$test_home"
     cleanup_test_repo
 }
+
+# =============================================================================
+# Tab Completion: _gwt_complete_branches Tests
+# =============================================================================
+
+@test '_gwt_complete_branches lists local branch names' {
+    create_test_repo
+    git checkout -q -b feature/foo
+    git checkout -q -b feature/bar
+    git checkout -q main
+
+    run _gwt_complete_branches
+
+    assert $state equals 0
+    assert "$output" contains "main"
+    assert "$output" contains "feature/foo"
+    assert "$output" contains "feature/bar"
+    cleanup_test_repo
+}
+
+@test '_gwt_complete_branches includes remote tracking branches' {
+    create_test_repo
+
+    # Create a "remote" repo and add it as origin
+    local remote_dir="$TEST_DIR/remote-repo"
+    git clone -q "$REPO_DIR" "$remote_dir"
+    cd "$remote_dir"
+    git checkout -q -b remote-only-branch
+    echo "remote content" > remote-file.txt
+    git add remote-file.txt
+    git commit -q -m "remote commit"
+
+    cd "$REPO_DIR"
+    git remote add origin "$remote_dir"
+    git fetch -q origin
+
+    run _gwt_complete_branches
+
+    assert $state equals 0
+    assert "$output" contains "remote-only-branch"
+    cleanup_test_repo
+}
+
+@test '_gwt_complete_branches deduplicates local and remote branches' {
+    create_test_repo
+
+    # Create a "remote" repo and add as origin
+    local remote_dir="$TEST_DIR/remote-repo"
+    git clone -q "$REPO_DIR" "$remote_dir"
+    cd "$REPO_DIR"
+    git remote add origin "$remote_dir"
+    git fetch -q origin
+
+    run _gwt_complete_branches
+
+    # "main" exists both locally and as origin/main — should appear once
+    local count=$(echo "$output" | grep -c "^main$")
+    assert "$count" same_as "1"
+    cleanup_test_repo
+}
+
+@test '_gwt_complete_branches excludes HEAD from remote branches' {
+    create_test_repo
+
+    local remote_dir="$TEST_DIR/remote-repo"
+    git clone -q "$REPO_DIR" "$remote_dir"
+    cd "$REPO_DIR"
+    git remote add origin "$remote_dir"
+    git fetch -q origin
+
+    run _gwt_complete_branches
+
+    assert "$output" does_not_contain "HEAD"
+    cleanup_test_repo
+}
+
+@test '_gwt_complete_branches returns non-zero outside git repo' {
+    local test_dir=$(mktemp -d)
+    mkdir -p "$test_dir/not-a-repo"
+    cd "$test_dir/not-a-repo"
+
+    run _gwt_complete_branches
+
+    assert $state equals 1
+    _safe_rm_rf "$test_dir"
+}
+
+@test '_gwt_complete_branches handles repo with only main branch' {
+    create_test_repo
+
+    run _gwt_complete_branches
+
+    assert $state equals 0
+    assert "$output" contains "main"
+    cleanup_test_repo
+}
+
+@test '_gwt_complete_branches handles branches with slashes' {
+    create_test_repo
+    git checkout -q -b feature/deep/nested/branch
+    git checkout -q main
+
+    run _gwt_complete_branches
+
+    assert $state equals 0
+    assert "$output" contains "feature/deep/nested/branch"
+    cleanup_test_repo
+}
+
+@test '_gwt_complete_branches handles branches with dots' {
+    create_test_repo
+    git checkout -q -b release/v1.2.3
+    git checkout -q main
+
+    run _gwt_complete_branches
+
+    assert $state equals 0
+    assert "$output" contains "release/v1.2.3"
+    cleanup_test_repo
+}
+
+@test '_gwt_complete_branches handles branches with hyphens and numbers' {
+    create_test_repo
+    git checkout -q -b fix/eng-1234-bug-fix
+    git checkout -q main
+
+    run _gwt_complete_branches
+
+    assert $state equals 0
+    assert "$output" contains "fix/eng-1234-bug-fix"
+    cleanup_test_repo
+}
+
+@test '_gwt_complete_branches works from inside a linked worktree' {
+    create_test_repo
+    git checkout -q -b feature/comp-wt-branch
+    git checkout -q main
+
+    local worktree_path="$PARENT_DIR/test-repo-comp-wt"
+    git worktree add -q -b test/eng-comp-wt "$worktree_path" HEAD
+    cd "$worktree_path"
+
+    run _gwt_complete_branches
+
+    assert $state equals 0
+    assert "$output" contains "main"
+    assert "$output" contains "feature/comp-wt-branch"
+    cleanup_test_repo
+}
+
+@test '_gwt_complete_branches handles no remotes gracefully' {
+    create_test_repo
+    # No remotes configured by default in test repo
+
+    run _gwt_complete_branches
+
+    assert $state equals 0
+    assert "$output" contains "main"
+    cleanup_test_repo
+}
+
+# =============================================================================
+# Tab Completion: _gwt_complete_worktrees Tests
+# =============================================================================
+
+@test '_gwt_complete_worktrees lists linked worktree branch names' {
+    create_test_repo
+    local worktree_path="$PARENT_DIR/test-repo-comp-wt-list"
+    git worktree add -q -b feature/wt-complete "$worktree_path" HEAD
+
+    run _gwt_complete_worktrees
+
+    assert $state equals 0
+    assert "$output" contains "feature/wt-complete"
+    cleanup_test_repo
+}
+
+@test '_gwt_complete_worktrees excludes main worktree' {
+    create_test_repo
+    local worktree_path="$PARENT_DIR/test-repo-comp-wt-excl"
+    git worktree add -q -b feature/wt-excl "$worktree_path" HEAD
+
+    run _gwt_complete_worktrees
+
+    assert "$output" does_not_contain "main"
+    cleanup_test_repo
+}
+
+@test '_gwt_complete_worktrees lists multiple worktrees' {
+    create_test_repo
+    git worktree add -q -b feature/wt-multi-1 "$PARENT_DIR/test-repo-multi-1" HEAD
+    git worktree add -q -b feature/wt-multi-2 "$PARENT_DIR/test-repo-multi-2" HEAD
+    git worktree add -q -b feature/wt-multi-3 "$PARENT_DIR/test-repo-multi-3" HEAD
+
+    run _gwt_complete_worktrees
+
+    assert $state equals 0
+    assert "$output" contains "feature/wt-multi-1"
+    assert "$output" contains "feature/wt-multi-2"
+    assert "$output" contains "feature/wt-multi-3"
+    cleanup_test_repo
+}
+
+@test '_gwt_complete_worktrees returns empty when no linked worktrees' {
+    create_test_repo
+
+    run _gwt_complete_worktrees
+
+    assert "$output" is_empty
+    cleanup_test_repo
+}
+
+@test '_gwt_complete_worktrees returns non-zero outside git repo' {
+    local test_dir=$(mktemp -d)
+    mkdir -p "$test_dir/not-a-repo"
+    cd "$test_dir/not-a-repo"
+
+    run _gwt_complete_worktrees
+
+    assert $state equals 1
+    _safe_rm_rf "$test_dir"
+}
+
+@test '_gwt_complete_worktrees works from inside a linked worktree' {
+    create_test_repo
+    git worktree add -q -b feature/wt-from-a "$PARENT_DIR/test-repo-from-a" HEAD
+    git worktree add -q -b feature/wt-from-b "$PARENT_DIR/test-repo-from-b" HEAD
+    cd "$PARENT_DIR/test-repo-from-a"
+
+    run _gwt_complete_worktrees
+
+    assert $state equals 0
+    assert "$output" contains "feature/wt-from-b"
+    cleanup_test_repo
+}
+
+@test '_gwt_complete_worktrees handles stacked worktrees' {
+    create_test_repo
+    git checkout -q -b feature/stack-parent
+    local parent_path=$(pwd)
+
+    gwt --stack test/eng-9950-stack-child >/dev/null 2>&1
+    cd "$parent_path"
+
+    run _gwt_complete_worktrees
+
+    assert $state equals 0
+    assert "$output" contains "test/eng-9950-stack-child"
+    cleanup_test_repo
+}
+
+@test '_gwt_complete_worktrees handles worktree with detached HEAD' {
+    create_test_repo
+    local head_sha=$(git rev-parse HEAD)
+    local worktree_path="$PARENT_DIR/test-repo-detached"
+    git worktree add -q --detach "$worktree_path" "$head_sha"
+
+    run _gwt_complete_worktrees
+
+    # Should not crash; detached worktree has no branch so it's skipped
+    assert $state equals 0
+    cleanup_test_repo
+}
+
+@test '_gwt_complete_worktrees handles worktree branch with slashes' {
+    create_test_repo
+    local worktree_path="$PARENT_DIR/test-repo-slash-wt"
+    git worktree add -q -b feature/deep/path "$worktree_path" HEAD
+
+    run _gwt_complete_worktrees
+
+    assert $state equals 0
+    assert "$output" contains "feature/deep/path"
+    cleanup_test_repo
+}
+
+# =============================================================================
+# Tab Completion: Function Definition & compdef Registration Tests
+# =============================================================================
+
+@test '_gwt completion function is defined after plugin load' {
+    run type _gwt
+
+    assert "$output" contains "function"
+}
+
+@test '_gwt_complete_branches function is defined after plugin load' {
+    run type _gwt_complete_branches
+
+    assert "$output" contains "function"
+}
+
+@test '_gwt_complete_worktrees function is defined after plugin load' {
+    run type _gwt_complete_worktrees
+
+    assert "$output" contains "function"
+}
+
+@test 'compdef registers _gwt for gwt command' {
+    autoload -U compinit && compinit -u 2>/dev/null
+    source "$REPO_ROOT/gwt.plugin.zsh"
+
+    assert "$_comps[gwt]" same_as "_gwt"
+}
+
+@test 'compdef registers _gwt for default wt alias' {
+    autoload -U compinit && compinit -u 2>/dev/null
+    unset GWT_ALIAS
+    source "$REPO_ROOT/gwt.plugin.zsh"
+
+    assert "$_comps[wt]" same_as "_gwt"
+}
+
+@test 'compdef registers _gwt for custom alias' {
+    autoload -U compinit && compinit -u 2>/dev/null
+    export GWT_ALIAS="gw"
+    source "$REPO_ROOT/gwt.plugin.zsh"
+
+    assert "$_comps[gw]" same_as "_gwt"
+    unalias gw 2>/dev/null
+    unset GWT_ALIAS
+}
+
+@test 'compdef does NOT register alias completion when GWT_ALIAS is empty' {
+    autoload -U compinit && compinit -u 2>/dev/null
+    # Clear any existing wt completion
+    unset "_comps[wt]" 2>/dev/null
+    export GWT_ALIAS=""
+    source "$REPO_ROOT/gwt.plugin.zsh"
+
+    # wt should not have completion registered
+    [[ -z "$_comps[wt]" || "$_comps[wt]" != "_gwt" ]]
+    assert $? equals 0
+    unset GWT_ALIAS
+}
+
+@test 'compdef registers alias from config file when env var not set' {
+    autoload -U compinit && compinit -u 2>/dev/null
+    local test_home=$(mktemp -d)
+    mkdir -p "$test_home/.config/gwt"
+    echo 'GWT_ALIAS=myalias' > "$test_home/.config/gwt/config"
+    unset GWT_ALIAS
+
+    HOME="$test_home" source "$REPO_ROOT/gwt.plugin.zsh"
+
+    assert "$_comps[myalias]" same_as "_gwt"
+    unalias myalias 2>/dev/null
+    _safe_rm_rf "$test_home"
+}
+
+@test '_gwt does not crash when called outside git repo' {
+    local test_dir=$(mktemp -d)
+    mkdir -p "$test_dir/not-a-repo"
+    cd "$test_dir/not-a-repo"
+
+    run _gwt 2>&1
+
+    # Should exit cleanly (0 or 1), not crash
+    [[ $state -le 1 ]]
+    assert $? equals 0
+    _safe_rm_rf "$test_dir"
+}
+
+@test '_gwt does not crash when called in empty repo' {
+    create_test_repo
+
+    run _gwt 2>&1
+
+    [[ $state -le 1 ]]
+    assert $? equals 0
+    cleanup_test_repo
+}

@@ -1763,6 +1763,110 @@ HELP
 # Auto-migrate settings from ~/.zshrc to ~/.config/gwt/config on plugin load
 _gwt_migrate_config
 
+# =============================================================================
+# Tab Completion
+# =============================================================================
+
+# Helper: list local + remote branch names (one per line, deduplicated)
+_gwt_complete_branches() {
+    git rev-parse --git-dir &>/dev/null || return 1
+
+    local -a local_branches remote_branches all_branches
+
+    # Local branches
+    local_branches=(${(f)"$(git branch --format='%(refname:short)' 2>/dev/null)"})
+
+    # Remote tracking branches (strip remote prefix, exclude HEAD)
+    remote_branches=(${(f)"$(git branch -r --format='%(refname:short)' 2>/dev/null | sed 's|^[^/]*/||' | grep -v '^HEAD')"})
+
+    # Merge and deduplicate
+    all_branches=(${(u)local_branches} ${(u)remote_branches})
+    all_branches=(${(u)all_branches})
+
+    printf '%s\n' "${all_branches[@]}"
+}
+
+# Helper: list linked worktree branch names (one per line, excludes main worktree)
+_gwt_complete_worktrees() {
+    git rev-parse --git-dir &>/dev/null || return 1
+
+    local repo_root
+    repo_root=$(git worktree list --porcelain 2>/dev/null | head -1)
+    repo_root="${repo_root#worktree }"
+
+    local -a wt_branches
+    local cur_path=""
+
+    while IFS= read -r line; do
+        case "$line" in
+            worktree\ *)
+                cur_path="${line#worktree }"
+                ;;
+            branch\ refs/heads/*)
+                # Only add if not the main worktree
+                if [[ "$cur_path" != "$repo_root" ]]; then
+                    wt_branches+=("${line#branch refs/heads/}")
+                fi
+                ;;
+        esac
+    done < <(git worktree list --porcelain 2>/dev/null)
+
+    [[ ${#wt_branches[@]} -gt 0 ]] && printf '%s\n' "${wt_branches[@]}"
+    return 0
+}
+
+# Main completion function for gwt
+_gwt() {
+    local curcontext="$curcontext" state line
+    local -A opt_args
+    local ret=1
+
+    _arguments -C \
+        '(- :)'{--help,-h}'[show help message]' \
+        '(- :)--version[show version information]' \
+        '(- :)--update[update gwt to the latest version]' \
+        '(- :)'{--setup-skill,--setup-ai}'[install Claude Code skill]' \
+        '(- :)--repair[fix broken worktree config]' \
+        '(- :)--list-copy-dirs[list configured copy directories]' \
+        '(- :)--config[open interactive settings menu]' \
+        '(- :)--list[list worktrees for this repo]' \
+        '(- :)--prune[interactive worktree pruning]' \
+        '(- :)'{--base,-b}'[navigate to parent worktree]' \
+        '(- :)'{--root,-r}'[navigate to main worktree]' \
+        '(- :)'{--info,-i}'[show worktree stack relationships]' \
+        '(--stack -s --from -f)'{--stack,-s}'[create worktree from current branch]' \
+        '(--stack -s --from -f)'{--from,-f}'[create worktree from base branch]:base branch:->branches' \
+        '*--copy-config-dirs[copy directory to new worktree]:directory:_directories' \
+        '::branch or navigation:->positional' \
+        && ret=0
+
+    case $state in
+        branches)
+            local -a branch_list
+            branch_list=(${(f)"$(_gwt_complete_branches)"})
+            if [[ ${#branch_list[@]} -gt 0 ]]; then
+                _describe -t branches 'branch' branch_list && ret=0
+            fi
+            ;;
+        positional)
+            local -a nav_opts branch_list wt_list
+            nav_opts=('..:navigate to parent worktree' '...:navigate to root worktree')
+            _describe -t navigation 'navigation' nav_opts
+
+            if git rev-parse --git-dir &>/dev/null; then
+                branch_list=(${(f)"$(_gwt_complete_branches)"})
+                [[ ${#branch_list[@]} -gt 0 ]] && _describe -t branches 'branch' branch_list
+
+                wt_list=(${(f)"$(_gwt_complete_worktrees)"})
+                [[ ${#wt_list[@]} -gt 0 ]] && _describe -t worktrees 'worktree' wt_list
+            fi
+            ret=0
+            ;;
+    esac
+
+    return $ret
+}
+
 # Configurable alias (default: wt)
 # Set GWT_ALIAS="" to disable, or GWT_ALIAS=myalias for custom
 # Check env var first (preserves empty-string-means-disable behavior)
@@ -1773,4 +1877,15 @@ else
     # Not in env — check config files
     local _gwt_resolved_alias=$(_gwt_config_resolve "GWT_ALIAS" "wt")
     [[ -n "$_gwt_resolved_alias" ]] && alias "${_gwt_resolved_alias}=gwt"
+fi
+
+# Register tab completions for gwt and its alias (only if compdef is available)
+if (( $+functions[compdef] )); then
+    compdef _gwt gwt
+    if [[ -n "${GWT_ALIAS+x}" ]]; then
+        [[ -n "$GWT_ALIAS" ]] && compdef _gwt "${GWT_ALIAS}"
+    else
+        local _gwt_comp_alias=$(_gwt_config_resolve "GWT_ALIAS" "wt")
+        [[ -n "$_gwt_comp_alias" ]] && compdef _gwt "${_gwt_comp_alias}"
+    fi
 fi
