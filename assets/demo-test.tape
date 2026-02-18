@@ -13,10 +13,13 @@ Hide
 Type "source ~/.zshrc"
 Enter
 Sleep 1s
-Type "GWT_PLUGIN_DIR=$(pwd)"
+Type "unsetopt correct correctall 2>/dev/null"
 Enter
 Sleep 200ms
-Type "export DEMO_DIR=$(mktemp -d)/myapp && mkdir -p $DEMO_DIR && cd $DEMO_DIR"
+Type "export GWT_PLUGIN_DIR=$(pwd)"
+Enter
+Sleep 200ms
+Type "export DEMO_DIR=$GWT_PLUGIN_DIR/demo-repo && rm -rf $DEMO_DIR && mkdir -p $DEMO_DIR && cd $DEMO_DIR"
 Enter
 Sleep 200ms
 Type "git init -q -b main && git config user.email demo@test.com && git config user.name Demo"
@@ -47,10 +50,8 @@ Ctrl+L
 Sleep 200ms
 
 # 1. Create worktrees
-Hide
-Type "echo '→ Create worktrees — just type gwt <branch>'"
+Type "# Create worktrees — just type gwt <branch>"
 Enter
-Show
 Sleep 500ms
 Type "gwt feature/api-v2"
 Enter
@@ -64,10 +65,8 @@ Ctrl+L
 Sleep 200ms
 
 # 2. Navigate between worktrees
-Hide
-Type "echo '→ Navigate up with gwt .. and to root with gwt ...'"
+Type "# Navigate up with gwt .. and to root with gwt ..."
 Enter
-Show
 Sleep 500ms
 Type "gwt .."
 Enter
@@ -84,10 +83,8 @@ Ctrl+L
 Sleep 200ms
 
 # 3. List all worktrees
-Hide
-Type "echo '→ See all worktrees at a glance'"
+Type "# See all worktrees at a glance"
 Enter
-Show
 Sleep 500ms
 Type "gwt --list"
 Enter
@@ -97,15 +94,12 @@ Ctrl+L
 Sleep 200ms
 
 # 4. Prune worktrees
-Hide
-Type "echo '→ Clean up with interactive multi-select pruning'"
+Type "# Clean up with interactive multi-select pruning"
 Enter
-Show
 Sleep 500ms
 Type "gwt --prune"
 Enter
 Sleep 500ms
-Tab
 Tab
 Enter
 Sleep 500ms
@@ -120,10 +114,8 @@ Ctrl+L
 Sleep 200ms
 
 # 5. Configure post-create hook
-Hide
-Type "echo '→ Set a post-create hook — run anything after worktree creation'"
+Type "# Set a post-create hook — run anything after worktree creation"
 Enter
-Show
 Sleep 500ms
 Type "gwt --config"
 Enter
@@ -156,10 +148,8 @@ Ctrl+L
 Sleep 200ms
 
 # 6. Create worktree — post-create hook runs claude
-Hide
-Type "echo '→ Now every new worktree auto-launches claude'"
+Type "# Now every new worktree auto-launches claude"
 Enter
-Show
 Sleep 500ms
 Type "gwt feature/api-v2"
 Enter
@@ -176,7 +166,7 @@ Type "sed -i '' '/GWT_POST_CREATE_CMD/d' ~/.config/gwt/config"
 Enter
 Type "echo 'GWT_POST_CREATE_CMD=claude' >> ~/.config/gwt/config"
 Enter
-Type "cd / && rm -rf $DEMO_DIR && rm -rf ${DEMO_DIR%/*}"
+Type "cd $GWT_PLUGIN_DIR && rm -rf $DEMO_DIR demo-repo-api-v2 demo-repo-api-v2-api-v2-tests"
 Enter
 Sleep 200ms
 Show
