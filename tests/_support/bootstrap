@@ -5,6 +5,9 @@
 # Get the repo root
 REPO_ROOT="${0:A:h:h:h}"
 
+# Suppress migration warning during tests
+_GWT_MIGRATE_WARNED=1
+
 # Source the plugin
 source "$REPO_ROOT/gwt.plugin.zsh"
 
@@ -49,12 +52,19 @@ create_test_repo() {
     git add README.md
     git commit -q -m "Initial commit"
 
+    # Isolate tests from user's real config
+    _GWT_MIGRATE_WARNED=1
+    _GWT_ORIG_HOME="$HOME"
+    export HOME="$TEST_DIR"
+
     # Re-source plugin in the new directory
     source "$REPO_ROOT/gwt.plugin.zsh"
 }
 
 # Helper to cleanup test repo
 cleanup_test_repo() {
+    # Restore original HOME
+    [[ -n "$_GWT_ORIG_HOME" ]] && export HOME="$_GWT_ORIG_HOME"
     cd "$REPO_ROOT" 2>/dev/null || true
     if [[ -n "$REPO_DIR" ]] && [[ -d "$REPO_DIR" ]]; then
         cd "$REPO_DIR" && git worktree prune 2>/dev/null || true

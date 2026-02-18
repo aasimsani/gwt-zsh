@@ -4,6 +4,8 @@
 
 Stop typing `git worktree add ../myrepo-feature ../myrepo-feature feature/branch` every time. Just type `gwt feature/branch` and get on with your life.
 
+![gwt demo](assets/demo.gif)
+
 ## Features
 
 - **Smart Worktree Creation** - Auto-names worktrees from branch names and cd's into them

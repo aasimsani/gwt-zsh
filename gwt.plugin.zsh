@@ -352,8 +352,11 @@ _gwt_migrate_config() {
 
     # Skip if global config already exists (don't overwrite)
     if [[ -f "$global_config" ]]; then
-        # Still show deprecation warning if zshrc has GWT vars
-        print -P "%F{yellow}gwt:%f you can now remove GWT_* exports from ~/.zshrc (deprecated)"
+        # Still show deprecation warning if zshrc has GWT vars (once per session)
+        if [[ -z "$_GWT_MIGRATE_WARNED" ]]; then
+            print -P "%F{yellow}gwt:%f you can now remove GWT_* exports from ~/.zshrc (deprecated)" >&2
+            _GWT_MIGRATE_WARNED=1
+        fi
         return 0
     fi
 
@@ -370,8 +373,9 @@ _gwt_migrate_config() {
         fi
     done < <(grep '^export GWT_' "$zshrc")
 
-    print -P "%F{yellow}gwt:%f migrated settings to ~/.config/gwt/config"
-    print -P "%F{yellow}gwt:%f you can now remove GWT_* exports from ~/.zshrc (deprecated)"
+    print -P "%F{yellow}gwt:%f migrated settings to ~/.config/gwt/config" >&2
+    print -P "%F{yellow}gwt:%f you can now remove GWT_* exports from ~/.zshrc (deprecated)" >&2
+    _GWT_MIGRATE_WARNED=1
 }
 
 # =============================================================================
@@ -738,7 +742,7 @@ _gwt_config_copy_dirs() {
         local choice=""
 
         local use_fzf=false
-        if [[ -z "$GWT_NO_FZF" ]] && command -v fzf &> /dev/null && [[ -t 0 ]]; then
+        if [[ -z "$(_gwt_config_resolve "GWT_NO_FZF" "")" ]] && command -v fzf &> /dev/null && [[ -t 0 ]]; then
             use_fzf=true
         fi
 
@@ -1009,7 +1013,7 @@ _gwt_config() {
     while true; do
         # Re-evaluate fzf each iteration (may have been toggled)
         local use_fzf=false
-        if [[ -z "$GWT_NO_FZF" ]] && command -v fzf &> /dev/null && [[ -t 0 ]]; then
+        if [[ -z "$(_gwt_config_resolve "GWT_NO_FZF" "")" ]] && command -v fzf &> /dev/null && [[ -t 0 ]]; then
             use_fzf=true
         fi
 
@@ -1162,10 +1166,11 @@ _gwt_run_post_create_hook() {
         return 0
     fi
 
-    # Fallback to env var
-    if [[ -n "$GWT_POST_CREATE_CMD" ]]; then
-        echo "Running post-create hook: $GWT_POST_CREATE_CMD"
-        eval "$GWT_POST_CREATE_CMD"
+    # Fallback to config/env var
+    local post_cmd=$(_gwt_config_resolve "GWT_POST_CREATE_CMD" "")
+    if [[ -n "$post_cmd" ]]; then
+        echo "Running post-create hook: $post_cmd"
+        eval "$post_cmd"
         local exit_code=$?
         if [[ $exit_code -ne 0 ]]; then
             echo "Warning: Post-create hook failed with exit code $exit_code" >&2
@@ -1214,7 +1219,7 @@ _gwt_prune() {
 
     # Use fzf if available and stdin is a TTY, otherwise fallback
     local -a to_prune=()
-    if [[ -z "$GWT_NO_FZF" ]] && command -v fzf &> /dev/null && [[ -t 0 ]]; then
+    if [[ -z "$(_gwt_config_resolve "GWT_NO_FZF" "")" ]] && command -v fzf &> /dev/null && [[ -t 0 ]]; then
         # fzf multi-select mode
         local selected
         selected=$(printf '%s\n' "${worktree_display[@]}" | fzf --multi \
@@ -1760,11 +1765,12 @@ _gwt_migrate_config
 
 # Configurable alias (default: wt)
 # Set GWT_ALIAS="" to disable, or GWT_ALIAS=myalias for custom
-if [[ -z "${GWT_ALIAS+x}" ]]; then
-    # Not set at all — use default
-    alias wt=gwt
-elif [[ -n "$GWT_ALIAS" ]]; then
-    # Set to a non-empty value — use that
-    alias "${GWT_ALIAS}=gwt"
+# Check env var first (preserves empty-string-means-disable behavior)
+if [[ -n "${GWT_ALIAS+x}" ]]; then
+    # Env var is explicitly set
+    [[ -n "$GWT_ALIAS" ]] && alias "${GWT_ALIAS}=gwt"
+else
+    # Not in env — check config files
+    local _gwt_resolved_alias=$(_gwt_config_resolve "GWT_ALIAS" "wt")
+    [[ -n "$_gwt_resolved_alias" ]] && alias "${_gwt_resolved_alias}=gwt"
 fi
-# If GWT_ALIAS="" (empty string), no alias created
