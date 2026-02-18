@@ -485,6 +485,10 @@ zsh scripts/coverage_check.zsh
 git config core.hooksPath .githooks
 ```
 
+## See Also
+
+- **[gwt-powershell](https://github.com/aasimsani/gwt-powershell)** - PowerShell port of gwt, works on macOS (pwsh) and Windows
+
 ## License
 
 MIT
