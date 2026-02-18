@@ -1,18 +1,18 @@
-Output assets/demo.gif
+Output assets/demo-test.gif
 
 Set FontSize 20
 Set Width 1200
 Set Height 600
 Set Theme "Catppuccin Frappe"
 Set Shell zsh
-Set TypingSpeed 80ms
+Set TypingSpeed 0
 Set Padding 20
 
 # Hidden setup — isolated temp repo so we don't touch the real one
 Hide
 Type "source ~/.zshrc"
 Enter
-Sleep 2s
+Sleep 1s
 Type "GWT_PLUGIN_DIR=$(pwd)"
 Enter
 Sleep 200ms
@@ -27,121 +27,121 @@ Enter
 Sleep 500ms
 Type "source $GWT_PLUGIN_DIR/gwt.plugin.zsh"
 Enter
-Sleep 1s
+Sleep 500ms
 # Clear post-create command so config shows (none) later
 Type "sed -i '' '/GWT_POST_CREATE_CMD/d' ~/.config/gwt/config"
 Enter
-Sleep 500ms
+Sleep 200ms
 Type "unset GWT_POST_CREATE_CMD"
 Enter
-Sleep 500ms
+Sleep 200ms
 Ctrl+L
 Show
 
 # Opening — neofetch with custom config
 Type "neofetch --config $GWT_PLUGIN_DIR/assets/neofetch.conf"
 Enter
-Sleep 3s
+Sleep 2s
 
 Ctrl+L
-Sleep 500ms
+Sleep 200ms
 
 # 1. Create worktrees
 Hide
 Type "echo '→ Create worktrees — just type gwt <branch>'"
 Enter
 Show
-Sleep 2s
+Sleep 500ms
 Type "gwt feature/api-v2"
 Enter
-Sleep 2.5s
+Sleep 1s
 
 Type "gwt feature/api-v2-tests"
 Enter
-Sleep 2.5s
+Sleep 1s
 
 Ctrl+L
-Sleep 500ms
+Sleep 200ms
 
 # 2. Navigate between worktrees
 Hide
 Type "echo '→ Navigate up with gwt .. and to root with gwt ...'"
 Enter
 Show
-Sleep 2s
+Sleep 500ms
 Type "gwt .."
 Enter
-Sleep 2s
+Sleep 500ms
 
 Type "gwt feature/api-v2-tests"
 Enter
-Sleep 1.5s
+Sleep 500ms
 Type "gwt ..."
 Enter
-Sleep 2s
+Sleep 500ms
 
 Ctrl+L
-Sleep 500ms
+Sleep 200ms
 
 # 3. List all worktrees
 Hide
 Type "echo '→ See all worktrees at a glance'"
 Enter
 Show
-Sleep 2s
+Sleep 500ms
 Type "gwt --list"
 Enter
-Sleep 2.5s
+Sleep 1s
 
 Ctrl+L
-Sleep 500ms
+Sleep 200ms
 
 # 4. Prune worktrees
 Hide
 Type "echo '→ Clean up with interactive multi-select pruning'"
 Enter
 Show
-Sleep 2s
+Sleep 500ms
 Type "gwt --prune"
 Enter
-Sleep 1s
+Sleep 500ms
 Tab
 Tab
 Enter
-Sleep 1s
+Sleep 500ms
 Type "y"
 Enter
-Sleep 500ms
+Sleep 200ms
 Type "DELETE"
 Enter
-Sleep 2s
+Sleep 1s
 
 Ctrl+L
-Sleep 500ms
+Sleep 200ms
 
 # 5. Configure post-create hook
 Hide
 Type "echo '→ Set a post-create hook — run anything after worktree creation'"
 Enter
 Show
-Sleep 2s
+Sleep 500ms
 Type "gwt --config"
 Enter
-Sleep 1s
+Sleep 500ms
 # fzf menu: navigate down to "Post-create command" (5th item)
 Down
 Down
 Down
 Down
 Enter
-Sleep 1s
+Sleep 500ms
 # Sub-menu: 1) Set command
 Type "1"
 Enter
-Sleep 500ms
+Sleep 200ms
 Type "claude"
 Enter
-Sleep 1.5s
+Sleep 500ms
 # Back in fzf menu — navigate to "Done" (7th item, 6 downs)
 Down
 Down
@@ -150,25 +150,25 @@ Down
 Down
 Down
 Enter
-Sleep 1s
+Sleep 500ms
 
 Ctrl+L
-Sleep 500ms
+Sleep 200ms
 
 # 6. Create worktree — post-create hook runs claude
 Hide
 Type "echo '→ Now every new worktree auto-launches claude'"
 Enter
 Show
-Sleep 2s
+Sleep 500ms
 Type "gwt feature/api-v2"
 Enter
-Sleep 3s
+Sleep 2s
 
 # Let claude show for a moment, then exit
 Type "/exit"
 Enter
-Sleep 2s
+Sleep 1s
 
 # Restore config and clean up temp repo (hidden)
 Hide
@@ -178,5 +178,5 @@ Type "echo 'GWT_POST_CREATE_CMD=claude' >> ~/.config/gwt/config"
 Enter
 Type "cd / && rm -rf $DEMO_DIR && rm -rf ${DEMO_DIR%/*}"
 Enter
-Sleep 500ms
+Sleep 200ms
 Show
