@@ -128,11 +128,16 @@ _gwt_ui_select_one() {
 
     case "$backend" in
         gum)
-            printf '%s\n' "${items[@]}" | gum filter \
+            # Defensive: capture exit code. If gum exits non-zero (cancel, ESC,
+            # unknown flag, anything), discard stdout — never let gum's error
+            # output be parsed as data downstream.
+            local result rc
+            result=$(printf '%s\n' "${items[@]}" | gum filter \
                 --header="$header" \
                 --indicator="▶" \
-                --height=15 \
-                --reverse=false 2>/dev/null
+                --height=15 2>/dev/null)
+            rc=$?
+            [[ $rc -eq 0 ]] && echo "$result"
             ;;
         fzf)
             printf '%s\n' "${items[@]}" | fzf --no-multi \
@@ -175,12 +180,19 @@ _gwt_ui_select_many() {
 
     case "$backend" in
         gum)
-            printf '%s\n' "${items[@]}" | gum filter \
+            # Defensive: capture exit code. gum's --selected-prefix is the
+            # correct flag for marking selected items (NOT --selected-indicator,
+            # which does not exist and causes gum to dump its help to stderr).
+            local result rc
+            result=$(printf '%s\n' "${items[@]}" | gum filter \
                 --no-limit \
                 --header="$header" \
                 --indicator="▶" \
-                --selected-indicator="✓" \
-                --height=15 2>/dev/null
+                --selected-prefix=" ✓ " \
+                --unselected-prefix="   " \
+                --height=15 2>/dev/null)
+            rc=$?
+            [[ $rc -eq 0 ]] && echo "$result"
             ;;
         fzf)
             printf '%s\n' "${items[@]}" | fzf --multi \
@@ -354,8 +366,9 @@ _gwt_ui_pager_if_long() {
 if command -v gum &>/dev/null; then
     export GUM_FILTER_INDICATOR="▶"
     export GUM_FILTER_INDICATOR_FOREGROUND="$GWT_COLOR_PRIMARY"
-    export GUM_FILTER_SELECTED_INDICATOR="✓"
-    export GUM_FILTER_SELECTED_INDICATOR_FOREGROUND="$GWT_COLOR_ACCENT"
+    # gum filter's correct flag/env is selected-prefix (not selected-indicator).
+    export GUM_FILTER_SELECTED_PREFIX=" ✓ "
+    export GUM_FILTER_SELECTED_PREFIX_FOREGROUND="$GWT_COLOR_ACCENT"
     export GUM_FILTER_HEADER_FOREGROUND="$GWT_COLOR_DIM"
     export GUM_FILTER_PROMPT="❯ "
     export GUM_FILTER_PROMPT_FOREGROUND="$GWT_COLOR_PRIMARY"
@@ -1566,15 +1579,30 @@ _gwt_prune() {
     [[ -z "$selected" ]] && return 0
 
     # Extract paths from selected lines (between "● " or "○ " and " (")
-    local line extracted_path
+    # and validate against the known worktree list. Anything that does not
+    # exactly match one of the worktrees we showed is discarded — a defense
+    # against a backend ever emitting non-data output (e.g. help text).
+    local line extracted_path candidate
     while IFS= read -r line; do
         [[ -z "$line" ]] && continue
         extracted_path="${line#[●○] }"
         extracted_path="${extracted_path%% \(*}"
-        to_prune+=("$extracted_path")
+        local matched=false
+        for candidate in "${worktree_paths[@]}"; do
+            if [[ "$candidate" == "$extracted_path" ]]; then
+                matched=true
+                break
+            fi
+        done
+        if $matched; then
+            to_prune+=("$extracted_path")
+        fi
     done <<< "$selected"
 
-    [[ ${#to_prune[@]} -eq 0 ]] && return 0
+    if [[ ${#to_prune[@]} -eq 0 ]]; then
+        _gwt_ui_log info "Nothing selected"
+        return 0
+    fi
 
     # Check for uncommitted changes in any selected worktree
     local prune_path
@@ -1859,23 +1887,24 @@ LISTHELP
                 local glyph="●"
                 local prefix=""
                 local marker=""
-                local status="$wt_branch"
+                # NB: cannot use `status` here — it's a read-only special var in zsh.
+                local wt_label="$wt_branch"
 
                 # Indicate stacked worktrees
                 [[ -n "$wt_base" ]] && prefix="└─ "
                 # Indicate the main worktree
-                [[ "$wt_path" == "$repo_root" ]] && status="${wt_branch} ★ main"
+                [[ "$wt_path" == "$repo_root" ]] && wt_label="${wt_branch} ★ main"
                 # Indicate the current worktree
                 [[ "$wt_path" == "$current_path" ]] && marker=" ← you are here"
 
                 if [[ ! -d "$wt_path" ]]; then
                     glyph="○"
-                    status="(missing)"
+                    wt_label="(missing)"
                 fi
 
                 # Pad branch column for readability under monospaced renderers.
                 local padded_branch
-                padded_branch=$(printf "%-${max_branch_len}s" "$status")
+                padded_branch=$(printf "%-${max_branch_len}s" "$wt_label")
 
                 # Display line + trailing path field (TAB-delimited for post-select parsing)
                 picker_rows+=("${glyph} ${prefix}${padded_branch}  ${wt_path}${marker}	${wt_path}")
