@@ -32,7 +32,7 @@
 #   gwt --copy-config-dirs serena feature/branch  -> copies ./serena to worktree
 #   gwt --config                                  -> interactive config menu
 
-GWT_VERSION="1.7.0"
+GWT_VERSION="1.8.0"
 GWT_REPO="aasimsani/gwt-zsh"
 
 # Store install directory when sourced (works with all plugin managers)
@@ -798,6 +798,101 @@ _gwt_health_check() {
         git config --worktree core.bare false 2>/dev/null
         print -P "%F{$GWT_COLOR_WARN}gwt:%f repaired missing config.worktree (set core.bare=false)"
     fi
+}
+
+# Diagnostic dump — call this when a UI command misbehaves and there's no
+# obvious cause. Prints version, backend detection state, dependency versions,
+# TTY status, and a color sample so the user can confirm at a glance that
+# everything is wired up correctly.
+_gwt_doctor() {
+    _gwt_ui_header "gwt doctor"
+    echo ""
+
+    # Version + install
+    print -P "  %F{$GWT_COLOR_DIM}plugin version :%f $GWT_VERSION"
+    print -P "  %F{$GWT_COLOR_DIM}install dir    :%f ${GWT_INSTALL_DIR:-unknown}"
+    print -P "  %F{$GWT_COLOR_DIM}plugin file    :%f $GWT_INSTALL_DIR/gwt.plugin.zsh"
+    echo ""
+
+    # Environment
+    _gwt_ui_header "Environment"
+    local tty_stdin tty_stdout
+    [[ -t 0 ]] && tty_stdin="yes" || tty_stdin="no"
+    [[ -t 1 ]] && tty_stdout="yes" || tty_stdout="no"
+    print -P "  %F{$GWT_COLOR_DIM}stdin is TTY   :%f $tty_stdin"
+    print -P "  %F{$GWT_COLOR_DIM}stdout is TTY  :%f $tty_stdout"
+    print -P "  %F{$GWT_COLOR_DIM}TERM           :%f ${TERM:-(unset)}"
+    print -P "  %F{$GWT_COLOR_DIM}COLORTERM      :%f ${COLORTERM:-(unset)}"
+    print -P "  %F{$GWT_COLOR_DIM}LINES x COLUMNS:%f ${LINES:-?} x ${COLUMNS:-?}"
+    echo ""
+
+    # UI backend resolution
+    _gwt_ui_header "UI Backend"
+    print -P "  %F{$GWT_COLOR_DIM}GWT_UI_BACKEND :%f ${GWT_UI_BACKEND:-(unset, will auto-detect)}"
+    print -P "  %F{$GWT_COLOR_DIM}GWT_NO_GUM     :%f ${GWT_NO_GUM:-(unset)}"
+    print -P "  %F{$GWT_COLOR_DIM}GWT_NO_FZF     :%f ${GWT_NO_FZF:-(unset)}"
+    print -P "  %F{$GWT_COLOR_DIM}detected       :%B$(_gwt_ui_backend)%b"
+    echo ""
+
+    # Dependencies
+    _gwt_ui_header "Dependencies"
+    if command -v gum &>/dev/null; then
+        local gum_path=$(command -v gum)
+        # Old gum: 'gum version' subcommand; new gum: 'gum --version' flag
+        local gum_ver=$(gum --version 2>/dev/null | head -1)
+        [[ -z "$gum_ver" ]] && gum_ver=$(gum version 2>/dev/null | head -1)
+        [[ -z "$gum_ver" ]] && gum_ver="(could not detect — gum may be too old)"
+        _gwt_ui_log success "gum: $gum_ver"
+        print -P "    %F{$GWT_COLOR_DIM}path: $gum_path%f"
+    else
+        _gwt_ui_log warn "gum: not installed (install: brew install gum)"
+    fi
+    if command -v fzf &>/dev/null; then
+        _gwt_ui_log success "fzf: $(fzf --version 2>/dev/null | head -1)"
+        print -P "    %F{$GWT_COLOR_DIM}path: $(command -v fzf)%f"
+    else
+        _gwt_ui_log warn "fzf: not installed"
+    fi
+    _gwt_ui_log success "git: $(git --version 2>/dev/null)"
+    echo ""
+
+    # Color palette test
+    _gwt_ui_header "Catppuccin Frappe palette"
+    print -P "  %F{$GWT_COLOR_PRIMARY}■ primary    (#ca9ee6 mauve)%f"
+    print -P "  %F{$GWT_COLOR_ACCENT}■ accent     (#f4b8e4 pink)%f"
+    print -P "  %F{$GWT_COLOR_SUCCESS}■ success    (#a6d189 green)%f"
+    print -P "  %F{$GWT_COLOR_DANGER}■ danger     (#e78284 red)%f"
+    print -P "  %F{$GWT_COLOR_WARN}■ warn       (#e5c890 yellow)%f"
+    print -P "  %F{$GWT_COLOR_INFO}■ info       (#8caaee blue)%f"
+    print -P "  %F{$GWT_COLOR_HIGHLIGHT}■ highlight  (#81c8be teal)%f"
+    print -P "  %F{$GWT_COLOR_DIM}■ dim        (#737994 overlay0)%f"
+    print -P "  %F{$GWT_COLOR_DIM}If any of these look grey/missing, your terminal isn't in truecolor mode.%f"
+    echo ""
+
+    # Live gum filter probe — non-interactive smoke test of the picker pipeline.
+    if command -v gum &>/dev/null && [[ -t 0 ]]; then
+        _gwt_ui_header "gum filter probe (non-interactive)"
+        # Use --select-if-one + timeout so it doesn't hang. Validates that
+        # gum filter accepts our exact flag set without dumping help/errors.
+        local probe_out probe_rc
+        probe_out=$(printf 'probe-row-A\tprobe-row-A-path\n' | gum filter \
+            --select-if-one \
+            --header="probe" \
+            --indicator="▶" \
+            --height=15 \
+            --timeout=2s 2>&1)
+        probe_rc=$?
+        if [[ $probe_rc -eq 0 && "$probe_out" == *"probe-row-A"* ]]; then
+            _gwt_ui_log success "gum filter accepts gwt's flag set"
+        else
+            _gwt_ui_log error "gum filter probe FAILED (rc=$probe_rc)"
+            print -P "    %F{$GWT_COLOR_DIM}output:%f"
+            echo "$probe_out" | sed 's/^/      /'
+        fi
+        echo ""
+    fi
+
+    return 0
 }
 
 # =============================================================================
@@ -1724,6 +1819,7 @@ Worktree Management:
 Other Options:
   --setup-skill, --setup-ai Install Claude Code skill globally (~/.claude/skills/)
   --repair                  Fix broken worktree config (core.bare leak)
+  --doctor                  Diagnostic dump (versions, backend, palette, gum probe)
   --update                  Update gwt to the latest version
   --version                 Show version information
   --help, -h                Show this help message
@@ -1776,6 +1872,10 @@ HELP
             ;;
         --repair)
             _gwt_health_check
+            return $?
+            ;;
+        --doctor)
+            _gwt_doctor
             return $?
             ;;
         --list)
@@ -2303,6 +2403,7 @@ _gwt() {
         '(- :)--update[update gwt to the latest version]' \
         '(- :)'{--setup-skill,--setup-ai}'[install Claude Code skill]' \
         '(- :)--repair[fix broken worktree config]' \
+        '(- :)--doctor[diagnostic dump for troubleshooting UI/backend issues]' \
         '(- :)--list-copy-dirs[list configured copy directories]' \
         '(- :)--config[open interactive settings menu]' \
         '(- :)--list[list worktrees for this repo]' \
