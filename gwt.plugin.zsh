@@ -41,6 +41,344 @@ GWT_INSTALL_DIR="${0:A:h}"
 # Load ZSH colors module (built-in)
 autoload -U colors && colors
 
+# =============================================================================
+# Color Palette — Catppuccin Frappe (matches assets/demo.tape)
+# =============================================================================
+
+GWT_COLOR_PRIMARY="#ca9ee6"    # mauve    — headers, prompts, cursor
+GWT_COLOR_ACCENT="#f4b8e4"     # pink     — selections, highlights, markers
+GWT_COLOR_SUCCESS="#a6d189"    # green    — ✓, existing worktrees (●)
+GWT_COLOR_DANGER="#e78284"     # red      — ✕, missing worktrees (○)
+GWT_COLOR_WARN="#e5c890"       # yellow   — ⚠ warnings
+GWT_COLOR_INFO="#8caaee"       # blue     — └─ tree, info paths
+GWT_COLOR_HIGHLIGHT="#81c8be"  # teal     — current worktree marker
+GWT_COLOR_DIM="#737994"        # overlay0 — secondary labels
+GWT_COLOR_BORDER="#626880"     # surface2 — borders
+
+# =============================================================================
+# UI Backend Abstraction (gum > fzf > plain)
+# =============================================================================
+#
+# Resolves which interactive UI backend to use for menus, prompts and confirms.
+# Precedence (highest → lowest):
+#   1. GWT_UI_BACKEND env/config (explicit override: gum | fzf | plain)
+#   2. Non-TTY stdin                                              → plain
+#   3. gum on PATH and GWT_NO_GUM unset                           → gum
+#   4. fzf on PATH and GWT_NO_FZF unset                           → fzf
+#   5. fallback                                                   → plain
+#
+# All helpers below dispatch to one of three branches with identical semantics
+# so swapping backends never changes behavior — only presentation.
+
+_gwt_ui_backend() {
+    local override=""
+    if typeset -f _gwt_config_resolve &>/dev/null; then
+        override=$(_gwt_config_resolve "GWT_UI_BACKEND" "")
+    else
+        override="${GWT_UI_BACKEND:-}"
+    fi
+    case "$override" in
+        gum|fzf|plain) echo "$override"; return ;;
+    esac
+
+    # Non-TTY → always plain (scripts, pipes)
+    [[ ! -t 0 ]] && { echo plain; return; }
+
+    local no_gum="" no_fzf=""
+    if typeset -f _gwt_config_resolve &>/dev/null; then
+        no_gum=$(_gwt_config_resolve "GWT_NO_GUM" "")
+        no_fzf=$(_gwt_config_resolve "GWT_NO_FZF" "")
+    else
+        no_gum="${GWT_NO_GUM:-}"
+        no_fzf="${GWT_NO_FZF:-}"
+    fi
+
+    if [[ -z "$no_gum" ]] && command -v gum &>/dev/null; then
+        echo gum; return
+    fi
+    if [[ -z "$no_fzf" ]] && command -v fzf &>/dev/null; then
+        echo fzf; return
+    fi
+    echo plain
+}
+
+# One-shot hint when gum would be preferred but isn't installed.
+# Shown at most once per shell session, only when an interactive command runs.
+_gwt_ui_hint_gum_missing() {
+    [[ -n "$_GWT_GUM_HINT_SHOWN" ]] && return
+    command -v gum &>/dev/null && return
+    local no_gum=""
+    if typeset -f _gwt_config_resolve &>/dev/null; then
+        no_gum=$(_gwt_config_resolve "GWT_NO_GUM" "")
+    else
+        no_gum="${GWT_NO_GUM:-}"
+    fi
+    [[ -n "$no_gum" ]] && return
+    _GWT_GUM_HINT_SHOWN=1
+    print -P "%F{$GWT_COLOR_DIM}gwt: install %Bgum%b for a richer UI — %Bbrew install gum%b (or apt/scoop/pacman). Set GWT_NO_GUM=1 to silence.%f" >&2
+}
+
+# Single-select. Items passed as args. Prints chosen item to stdout.
+# Usage: _gwt_ui_select_one "<header>" "<item1>" "<item2>" ...
+_gwt_ui_select_one() {
+    local header="$1"; shift
+    local -a items=("$@")
+    [[ ${#items[@]} -eq 0 ]] && return 1
+    local backend=$(_gwt_ui_backend)
+
+    case "$backend" in
+        gum)
+            printf '%s\n' "${items[@]}" | gum filter \
+                --header="$header" \
+                --indicator="▶" \
+                --height=15 \
+                --reverse=false 2>/dev/null
+            ;;
+        fzf)
+            printf '%s\n' "${items[@]}" | fzf --no-multi \
+                --header="$header" \
+                --prompt="❯ " --pointer="▶" \
+                --color="hl:$GWT_COLOR_PRIMARY,hl+:$GWT_COLOR_ACCENT,pointer:$GWT_COLOR_PRIMARY,prompt:$GWT_COLOR_PRIMARY,header:$GWT_COLOR_DIM,marker:$GWT_COLOR_ACCENT,fg+:$GWT_COLOR_HIGHLIGHT,info:$GWT_COLOR_INFO" \
+                --reverse --height=40% \
+                --bind='ctrl-k:up,ctrl-j:down'
+            _gwt_ui_hint_gum_missing
+            ;;
+        plain)
+            local i=1 item
+            print -P "%F{$GWT_COLOR_DIM}$header%f" >&2
+            for item in "${items[@]}"; do
+                print -P "  %F{$GWT_COLOR_PRIMARY}$i)%f $item" >&2
+                ((i++))
+            done
+            print -Pn "%F{$GWT_COLOR_PRIMARY}❯%f " >&2
+            local choice
+            read choice
+            if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#items[@]} )); then
+                echo "${items[$choice]}"
+            elif [[ -n "$choice" ]]; then
+                # Pass non-numeric input through so callers preserving the
+                # legacy numbered-menu UX (e.g. typed names, "q" for quit) can
+                # handle it in their case statement, matching v1.x behavior.
+                echo "$choice"
+            fi
+            _gwt_ui_hint_gum_missing
+            ;;
+    esac
+}
+
+# Multi-select. Prints newline-separated selections to stdout.
+_gwt_ui_select_many() {
+    local header="$1"; shift
+    local -a items=("$@")
+    [[ ${#items[@]} -eq 0 ]] && return 1
+    local backend=$(_gwt_ui_backend)
+
+    case "$backend" in
+        gum)
+            printf '%s\n' "${items[@]}" | gum filter \
+                --no-limit \
+                --header="$header" \
+                --indicator="▶" \
+                --selected-indicator="✓" \
+                --height=15 2>/dev/null
+            ;;
+        fzf)
+            printf '%s\n' "${items[@]}" | fzf --multi \
+                --header="$header" \
+                --prompt="❯ " --pointer="▶" --marker="✓" \
+                --color="hl:$GWT_COLOR_PRIMARY,hl+:$GWT_COLOR_ACCENT,pointer:$GWT_COLOR_PRIMARY,prompt:$GWT_COLOR_PRIMARY,header:$GWT_COLOR_DIM,marker:$GWT_COLOR_ACCENT,fg+:$GWT_COLOR_HIGHLIGHT,info:$GWT_COLOR_INFO" \
+                --reverse --height=50% \
+                --bind='ctrl-k:up,ctrl-j:down'
+            _gwt_ui_hint_gum_missing
+            ;;
+        plain)
+            local i=1 item
+            print -P "%F{$GWT_COLOR_DIM}$header%f" >&2
+            print -P "%F{$GWT_COLOR_DIM}(space-separated numbers, 'all', or 'q' to cancel)%f" >&2
+            for item in "${items[@]}"; do
+                print -P "  %F{$GWT_COLOR_PRIMARY}$i)%f $item" >&2
+                ((i++))
+            done
+            print -Pn "%F{$GWT_COLOR_PRIMARY}❯%f " >&2
+            local input
+            read input
+            [[ "$input" == "q" ]] && return 0
+            if [[ "$input" == "all" ]]; then
+                printf '%s\n' "${items[@]}"
+            else
+                local num
+                for num in ${=input}; do
+                    if [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 1 && num <= ${#items[@]} )); then
+                        echo "${items[$num]}"
+                    fi
+                done
+            fi
+            _gwt_ui_hint_gum_missing
+            ;;
+    esac
+}
+
+# Yes/no. Returns 0 (yes) or 1 (no/cancel).
+_gwt_ui_confirm() {
+    local msg="$1"
+    local backend=$(_gwt_ui_backend)
+    case "$backend" in
+        gum)
+            gum confirm "$msg"
+            ;;
+        *)
+            print -Pn "  %F{$GWT_COLOR_PRIMARY}❯%f $msg (y/N): " >&2
+            local answer
+            read answer
+            [[ "$answer" == "y" || "$answer" == "Y" ]]
+            ;;
+    esac
+}
+
+# Single-line input. Echoes typed value to stdout.
+# Usage: _gwt_ui_input <prompt> [placeholder] [default]
+_gwt_ui_input() {
+    local prompt="$1"
+    local placeholder="${2:-}"
+    local default="${3:-}"
+    local backend=$(_gwt_ui_backend)
+    case "$backend" in
+        gum)
+            local -a args
+            args=(--prompt="$prompt: ")
+            [[ -n "$placeholder" ]] && args+=(--placeholder="$placeholder")
+            [[ -n "$default" ]] && args+=(--value="$default")
+            gum input "${args[@]}"
+            ;;
+        *)
+            local hint=""
+            [[ -n "$placeholder" ]] && hint=" %F{$GWT_COLOR_DIM}($placeholder)%f"
+            print -Pn "  %F{$GWT_COLOR_PRIMARY}❯%f $prompt${hint}: " >&2
+            local val
+            read val
+            if [[ -z "$val" && -n "$default" ]]; then
+                echo "$default"
+            else
+                echo "$val"
+            fi
+            ;;
+    esac
+}
+
+# Multi-line input (Ctrl+D submits under gum, single-line elsewhere).
+_gwt_ui_write() {
+    local prompt="$1"
+    local placeholder="${2:-}"
+    local backend=$(_gwt_ui_backend)
+    case "$backend" in
+        gum)
+            local -a args
+            args=(--header="$prompt (Ctrl+D to save)")
+            [[ -n "$placeholder" ]] && args+=(--placeholder="$placeholder")
+            gum write "${args[@]}"
+            ;;
+        *)
+            _gwt_ui_input "$prompt" "$placeholder"
+            ;;
+    esac
+}
+
+# Directory picker (tree-style under gum, text input elsewhere).
+_gwt_ui_pick_dir() {
+    local prompt="$1"
+    local base_dir="${2:-.}"
+    local backend=$(_gwt_ui_backend)
+    case "$backend" in
+        gum)
+            gum file --directory "$base_dir" --header="$prompt" 2>/dev/null
+            ;;
+        *)
+            _gwt_ui_input "$prompt"
+            ;;
+    esac
+}
+
+# Run a command with a spinner (gum only; otherwise just runs the command).
+# Usage: _gwt_ui_spin "<title>" -- <cmd> [args...]
+_gwt_ui_spin() {
+    local title="$1"; shift
+    [[ "$1" == "--" ]] && shift
+    local backend=$(_gwt_ui_backend)
+    case "$backend" in
+        gum)
+            gum spin --spinner=dot --title="$title" -- "$@"
+            ;;
+        *)
+            "$@"
+            ;;
+    esac
+}
+
+# Status log. Levels: success | warn | error | info.
+_gwt_ui_log() {
+    local level="$1"
+    local msg="$2"
+    local glyph color
+    case "$level" in
+        success) glyph="✓"; color="$GWT_COLOR_SUCCESS" ;;
+        warn)    glyph="⚠"; color="$GWT_COLOR_WARN" ;;
+        error)   glyph="✕"; color="$GWT_COLOR_DANGER" ;;
+        info)    glyph="●"; color="$GWT_COLOR_INFO" ;;
+        *)       glyph="●"; color="$GWT_COLOR_PRIMARY" ;;
+    esac
+    print -P "  %F{$color}$glyph%f $msg"
+}
+
+# Bold colored section header.
+_gwt_ui_header() {
+    print -P "%B%F{$GWT_COLOR_PRIMARY}$1%f%b"
+}
+
+# Auto-paginate stdin if it exceeds terminal height. gum only.
+_gwt_ui_pager_if_long() {
+    local content=$(cat)
+    local lines=$(echo "$content" | wc -l | tr -d ' ')
+    local no_pager=""
+    if typeset -f _gwt_config_resolve &>/dev/null; then
+        no_pager=$(_gwt_config_resolve "GWT_NO_PAGER" "")
+    fi
+    if (( lines > LINES - 5 )) && [[ "$(_gwt_ui_backend)" == gum ]] && [[ -z "$no_pager" ]]; then
+        echo "$content" | gum pager
+    else
+        echo "$content"
+    fi
+}
+
+# Pre-configure gum's per-command styling once at plugin load.
+# Individual gum calls stay terse because these defaults apply globally.
+if command -v gum &>/dev/null; then
+    export GUM_FILTER_INDICATOR="▶"
+    export GUM_FILTER_INDICATOR_FOREGROUND="$GWT_COLOR_PRIMARY"
+    export GUM_FILTER_SELECTED_INDICATOR="✓"
+    export GUM_FILTER_SELECTED_INDICATOR_FOREGROUND="$GWT_COLOR_ACCENT"
+    export GUM_FILTER_HEADER_FOREGROUND="$GWT_COLOR_DIM"
+    export GUM_FILTER_PROMPT="❯ "
+    export GUM_FILTER_PROMPT_FOREGROUND="$GWT_COLOR_PRIMARY"
+    export GUM_FILTER_MATCH_FOREGROUND="$GWT_COLOR_ACCENT"
+    export GUM_FILTER_CURSOR_TEXT_FOREGROUND="$GWT_COLOR_HIGHLIGHT"
+    export GUM_FILTER_TEXT_FOREGROUND=""
+    export GUM_INPUT_PROMPT="❯ "
+    export GUM_INPUT_PROMPT_FOREGROUND="$GWT_COLOR_PRIMARY"
+    export GUM_INPUT_CURSOR_FOREGROUND="$GWT_COLOR_ACCENT"
+    export GUM_INPUT_PLACEHOLDER_FOREGROUND="$GWT_COLOR_DIM"
+    export GUM_CONFIRM_PROMPT_FOREGROUND="$GWT_COLOR_PRIMARY"
+    export GUM_CONFIRM_SELECTED_BACKGROUND="$GWT_COLOR_PRIMARY"
+    export GUM_CONFIRM_UNSELECTED_FOREGROUND="$GWT_COLOR_DIM"
+    export GUM_SPIN_SPINNER="dot"
+    export GUM_SPIN_SPINNER_FOREGROUND="$GWT_COLOR_PRIMARY"
+    export GUM_SPIN_TITLE_FOREGROUND="$GWT_COLOR_DIM"
+    export GUM_WRITE_HEADER_FOREGROUND="$GWT_COLOR_DIM"
+    export GUM_WRITE_CURSOR_LINE_NUMBER_FOREGROUND="$GWT_COLOR_PRIMARY"
+    export GUM_WRITE_PLACEHOLDER_FOREGROUND="$GWT_COLOR_DIM"
+    export GUM_FILE_CURSOR_FOREGROUND="$GWT_COLOR_PRIMARY"
+    export GUM_FILE_DIRECTORY_FOREGROUND="$GWT_COLOR_INFO"
+fi
+
 # Terminal formatting helpers
 _gwt_print() {
     # Usage: _gwt_print "message" [color] [prefix_symbol]
@@ -73,7 +411,7 @@ _gwt_setup_skill() {
     local skill_dest="$skill_dir/SKILL.md"
 
     if [[ ! -f "$skill_source" ]]; then
-        print -P "%F{red}Error:%f Could not find skill source at $skill_source"
+        _gwt_ui_log error "Could not find skill source at $skill_source"
         return 1
     fi
 
@@ -86,9 +424,9 @@ _gwt_setup_skill() {
     cp "$skill_source" "$skill_dest"
 
     if $is_update; then
-        print -P "%F{green}✓%f Skill updated at $skill_dest"
+        _gwt_ui_log success "Skill updated at $skill_dest"
     else
-        print -P "%F{green}✓%f Skill installed at $skill_dest"
+        _gwt_ui_log success "Skill installed at $skill_dest"
     fi
     echo ""
     echo "Usage: Type /gwt in Claude Code to load gwt command reference."
@@ -138,8 +476,7 @@ _gwt_update() {
     fi
 
     # Fetch and pull
-    echo "Fetching latest..."
-    git fetch origin
+    _gwt_ui_spin "Fetching latest..." -- git fetch origin
 
     local local_rev=$(git rev-parse HEAD)
     local remote_rev=$(git rev-parse origin/main)
@@ -354,7 +691,7 @@ _gwt_migrate_config() {
     if [[ -f "$global_config" ]]; then
         # Still show deprecation warning if zshrc has GWT vars (once per session)
         if [[ -z "$_GWT_MIGRATE_WARNED" ]]; then
-            print -P "%F{yellow}gwt:%f you can now remove GWT_* exports from ~/.zshrc (deprecated)" >&2
+            print -P "%F{$GWT_COLOR_WARN}gwt:%f you can now remove GWT_* exports from ~/.zshrc (deprecated)" >&2
             _GWT_MIGRATE_WARNED=1
         fi
         return 0
@@ -373,8 +710,8 @@ _gwt_migrate_config() {
         fi
     done < <(grep '^export GWT_' "$zshrc")
 
-    print -P "%F{yellow}gwt:%f migrated settings to ~/.config/gwt/config" >&2
-    print -P "%F{yellow}gwt:%f you can now remove GWT_* exports from ~/.zshrc (deprecated)" >&2
+    print -P "%F{$GWT_COLOR_WARN}gwt:%f migrated settings to ~/.config/gwt/config" >&2
+    print -P "%F{$GWT_COLOR_WARN}gwt:%f you can now remove GWT_* exports from ~/.zshrc (deprecated)" >&2
     _GWT_MIGRATE_WARNED=1
 }
 
@@ -438,7 +775,7 @@ _gwt_health_check() {
     if [[ ! -f "$config_worktree" ]]; then
         # Recreate with core.bare=false to prevent bare repo leak
         git config --worktree core.bare false 2>/dev/null
-        print -P "%F{yellow}gwt:%f repaired missing config.worktree (set core.bare=false)"
+        print -P "%F{$GWT_COLOR_WARN}gwt:%f repaired missing config.worktree (set core.bare=false)"
     fi
 }
 
@@ -496,17 +833,17 @@ _gwt_navigate_base() {
     local base_path=$(_gwt_metadata_get "baseWorktreePath")
 
     if [[ -z "$base_path" ]]; then
-        print -P "%F{red}Error: No base worktree tracked for this worktree%f" >&2
-        print -P "%F{240}This worktree was not created with --stack or --from%f" >&2
+        print -P "%F{$GWT_COLOR_DANGER}Error: No base worktree tracked for this worktree%f" >&2
+        print -P "%F{$GWT_COLOR_DIM}This worktree was not created with --stack or --from%f" >&2
         return 1
     fi
 
     # Check if base worktree still exists
     if [[ ! -d "$base_path" ]]; then
         local base_branch=$(_gwt_metadata_get "baseBranch")
-        print -P "%F{red}Error: Base worktree no longer exists%f" >&2
-        print -P "%F{240}Base branch: $base_branch%f" >&2
-        print -P "%F{240}Expected path: $base_path%f" >&2
+        print -P "%F{$GWT_COLOR_DANGER}Error: Base worktree no longer exists%f" >&2
+        print -P "%F{$GWT_COLOR_DIM}Base branch: $base_branch%f" >&2
+        print -P "%F{$GWT_COLOR_DIM}Expected path: $base_path%f" >&2
         return 1
     fi
 
@@ -522,13 +859,13 @@ _gwt_navigate_root() {
     local git_common_dir=$(git rev-parse --git-common-dir 2>/dev/null)
 
     if [[ -z "$git_common_dir" ]]; then
-        print -P "%F{red}Error: Not in a git repository%f" >&2
+        print -P "%F{$GWT_COLOR_DANGER}Error: Not in a git repository%f" >&2
         return 1
     fi
 
     # If git-common-dir returns relative ".git", we're already in main worktree
     if [[ "$git_common_dir" == ".git" ]]; then
-        print -P "%F{240}Already in main worktree%f"
+        print -P "%F{$GWT_COLOR_DIM}Already in main worktree%f"
         return 0
     fi
 
@@ -537,8 +874,8 @@ _gwt_navigate_root() {
 
     # Verify the main worktree exists
     if [[ ! -d "$main_worktree" ]]; then
-        print -P "%F{red}Error: Main worktree no longer exists%f" >&2
-        print -P "%F{240}Expected path: $main_worktree%f" >&2
+        print -P "%F{$GWT_COLOR_DANGER}Error: Main worktree no longer exists%f" >&2
+        print -P "%F{$GWT_COLOR_DIM}Expected path: $main_worktree%f" >&2
         return 1
     fi
 
@@ -553,21 +890,22 @@ _gwt_show_info() {
     local worktree_path=$(pwd)
 
     echo ""
-    print -P "%B%F{cyan}Worktree Info%f%b"
+    _gwt_ui_header "Worktree Info"
     echo ""
 
     # Current branch
-    print -P "  %F{green}●%f Branch: %B$current_branch%b"
-    print -P "  %F{240}  Path: $worktree_path%f"
+    print -P "  %F{$GWT_COLOR_SUCCESS}●%f Branch: %B$current_branch%b"
+    print -P "  %F{$GWT_COLOR_DIM}  Path: $worktree_path%f"
     echo ""
 
     # Main worktree info (ultimate root)
     local git_common_dir=$(git rev-parse --git-common-dir 2>/dev/null)
     if [[ -n "$git_common_dir" && "$git_common_dir" != ".git" ]]; then
         local main_worktree="${git_common_dir:h}"
-        print -P "%B%F{cyan}Main Worktree%f%b (use %Bgwt ...%b or %Bgwt --root%b to navigate)"
+        _gwt_ui_header "Main Worktree"
+        print -P "  %F{$GWT_COLOR_DIM}(use %Bgwt ...%b or %Bgwt --root%b to navigate)%f"
         echo ""
-        print -P "  %F{green}●%f Path: %B$main_worktree%b"
+        print -P "  %F{$GWT_COLOR_SUCCESS}●%f Path: %B$main_worktree%b"
         echo ""
     fi
 
@@ -576,29 +914,31 @@ _gwt_show_info() {
     local base_path=$(_gwt_metadata_get "baseWorktreePath")
 
     if [[ -n "$base_branch" ]]; then
-        print -P "%B%F{cyan}Base Worktree%f%b (use %Bgwt ..%b or %Bgwt --base%b to navigate)"
+        _gwt_ui_header "Base Worktree"
+        print -P "  %F{$GWT_COLOR_DIM}(use %Bgwt ..%b or %Bgwt --base%b to navigate)%f"
         echo ""
         if [[ -d "$base_path" ]]; then
-            print -P "  %F{green}●%f Branch: %B$base_branch%b"
-            print -P "  %F{240}  Path: $base_path%f"
+            print -P "  %F{$GWT_COLOR_SUCCESS}●%f Branch: %B$base_branch%b"
+            print -P "  %F{$GWT_COLOR_DIM}  Path: $base_path%f"
         else
-            print -P "  %F{red}○%f Branch: %B$base_branch%b %F{red}(missing)%f"
-            print -P "  %F{240}  Path: $base_path (not found)%f"
+            print -P "  %F{$GWT_COLOR_DANGER}○%f Branch: %B$base_branch%b %F{$GWT_COLOR_DANGER}(missing)%f"
+            print -P "  %F{$GWT_COLOR_DIM}  Path: $base_path (not found)%f"
         fi
         echo ""
     else
-        print -P "%F{240}  Base: not tracked (worktree was not created with --stack or --from)%f"
+        print -P "%F{$GWT_COLOR_DIM}  Base: not tracked (worktree was not created with --stack or --from)%f"
         echo ""
     fi
 
     # Dependents (worktrees that have this as their base)
     local dependents=$(_gwt_registry_get_dependents "$current_branch")
     if [[ -n "$dependents" ]]; then
-        print -P "%B%F{cyan}Dependents%f%b (worktrees based on this branch)"
+        _gwt_ui_header "Dependents"
+        print -P "  %F{$GWT_COLOR_DIM}(worktrees based on this branch)%f"
         echo ""
         echo "$dependents" | while read -r dep; do
             if [[ -n "$dep" ]]; then
-                print -P "  %F{blue}├─%f $dep"
+                print -P "  %F{$GWT_COLOR_INFO}├─%f $dep"
             fi
         done
         echo ""
@@ -739,108 +1079,86 @@ _gwt_config_copy_dirs() {
 
     while true; do
         local current=$(_gwt_config_read_file "GWT_COPY_DIRS" "$config_file")
-        local choice=""
 
-        local use_fzf=false
-        if [[ -z "$(_gwt_config_resolve "GWT_NO_FZF" "")" ]] && command -v fzf &> /dev/null && [[ -t 0 ]]; then
-            use_fzf=true
-        fi
+        local header="Copy Directories"
+        [[ -n "$current" ]] && header="Copy Directories ─ Current: $current"
 
-        if $use_fzf; then
-            local header="Copy Directories"
-            [[ -n "$current" ]] && header="Copy Directories ─ Current: $current"
-            local -a actions=("● Add directory" "● Remove directory" "● List directories" "● Back")
-            choice=$(printf '%s\n' "${actions[@]}" | fzf \
-                --header="$header" \
-                --prompt="❯ " \
-                --pointer="▶" \
-                --color="prompt:cyan,pointer:green,header:dim" \
-                --reverse \
-                --height=40% \
-                --no-multi)
-            choice="${choice#● }"
-        else
-            echo ""
-            echo "--- Copy Directories ---"
-            if [[ -n "$current" ]]; then
-                echo "Current: $current"
-            else
-                echo "No directories configured"
-            fi
-            echo ""
-            echo "1) Add directory"
-            echo "2) Remove directory"
-            echo "3) List directories"
-            echo "4) Back"
-            echo ""
-            printf "Choice [1-4]: "
-            read choice
-            case "$choice" in
-                1) choice="Add directory" ;;
-                2) choice="Remove directory" ;;
-                3) choice="List directories" ;;
-                4|"") choice="Back" ;;
-            esac
-        fi
+        local choice
+        choice=$(_gwt_ui_select_one "$header" \
+            "● Add directory" \
+            "● Remove directory" \
+            "● List directories" \
+            "● Back")
+        choice="${choice#● }"
 
         case "$choice" in
             "Add directory")
-                print -Pn "  %F{cyan}❯%f Directory to add: "
-                read new_dir
+                local new_dir=""
+                # Under gum, use the tree-style directory picker rooted at repo root (or cwd)
+                if [[ "$(_gwt_ui_backend)" == gum ]] && command -v gum &>/dev/null; then
+                    local repo_root
+                    repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
+                    [[ -z "$repo_root" ]] && repo_root="$(pwd)"
+                    local picked
+                    picked=$(gum file --directory "$repo_root" \
+                        --header="Select directory to copy to new worktrees (ESC to type a path instead)" 2>/dev/null)
+                    if [[ -n "$picked" ]]; then
+                        # Convert to repo-relative if inside repo
+                        if [[ "$picked" == "$repo_root"/* ]]; then
+                            new_dir="${picked#$repo_root/}"
+                        else
+                            new_dir="$picked"
+                        fi
+                    fi
+                fi
+                # Fallback / non-gum / ESC from picker: text input
+                if [[ -z "$new_dir" ]]; then
+                    new_dir=$(_gwt_ui_input "Directory to add" ".vscode")
+                fi
                 if [[ -n "$new_dir" ]]; then
                     if ! _gwt_validate_dir "$new_dir"; then
                         continue
                     fi
                     if [[ -n "$current" ]]; then
                         if [[ ",$current," == *",$new_dir,"* ]]; then
-                            print -P "  %F{yellow}Directory '$new_dir' already configured%f"
+                            _gwt_ui_log warn "Directory '$new_dir' already configured"
                         else
                             _gwt_config_write_file "GWT_COPY_DIRS" "$current,$new_dir" "$config_file"
                             export GWT_COPY_DIRS="$current,$new_dir"
-                            print -P "  %F{green}✓%f Added '$new_dir'"
+                            _gwt_ui_log success "Added '$new_dir'"
                         fi
                     else
                         _gwt_config_write_file "GWT_COPY_DIRS" "$new_dir" "$config_file"
                         export GWT_COPY_DIRS="$new_dir"
-                        print -P "  %F{green}✓%f Added '$new_dir'"
+                        _gwt_ui_log success "Added '$new_dir'"
                     fi
                 fi
                 ;;
             "Remove directory")
                 if [[ -z "$current" ]]; then
-                    print -P "  %F{240}No directories to remove%f"
+                    print -P "  %F{$GWT_COLOR_DIM}No directories to remove%f"
                 else
-                    if $use_fzf; then
-                        local -a dirs_array
-                        IFS=',' read -rA dirs_array <<< "$current"
-                        local selected=$(printf '%s\n' "${dirs_array[@]}" | fzf --multi \
-                            --header="Select directories to remove" \
-                            --prompt="❯ " \
-                            --pointer="▶" \
-                            --marker="✓" \
-                            --color="prompt:cyan,pointer:green,marker:green,header:dim" \
-                            --reverse \
-                            --height=50%)
-                        if [[ -n "$selected" ]]; then
-                            local new_list="$current"
-                            while IFS= read -r rem_dir; do
-                                local escaped_dir=$(printf '%s' "$rem_dir" | sed 's/[[\.*^$/+?{}()|]/\\&/g')
-                                new_list=$(echo "$new_list" | tr ',' '\n' | grep -v "^${escaped_dir}$" | tr '\n' ',' | sed 's/,$//')
-                                print -P "  %F{green}✓%f Removed '$rem_dir'"
-                            done <<< "$selected"
-                            _gwt_config_write_file "GWT_COPY_DIRS" "$new_list" "$config_file"
-                            export GWT_COPY_DIRS="$new_list"
-                        fi
+                    local -a dirs_array
+                    IFS=',' read -rA dirs_array <<< "$current"
+                    local selected=""
+                    # Under gum/fzf: pick from the list (multi-select fuzzy).
+                    # Under plain: preserve legacy v1.x UX — type the directory
+                    # name to remove (one at a time).
+                    if [[ "$(_gwt_ui_backend)" == plain ]]; then
+                        selected=$(_gwt_ui_input "Directory to remove")
                     else
-                        printf "Directory to remove: "
-                        read rem_dir
-                        if [[ -n "$rem_dir" ]]; then
+                        selected=$(_gwt_ui_select_many "Select directories to remove" "${dirs_array[@]}")
+                    fi
+                    if [[ -n "$selected" ]]; then
+                        local new_list="$current"
+                        while IFS= read -r rem_dir; do
+                            [[ -z "$rem_dir" ]] && continue
                             local escaped_dir=$(printf '%s' "$rem_dir" | sed 's/[[\.*^$/+?{}()|]/\\&/g')
-                            local new_list=$(echo "$current" | tr ',' '\n' | grep -v "^${escaped_dir}$" | tr '\n' ',' | sed 's/,$//')
-                            _gwt_config_write_file "GWT_COPY_DIRS" "$new_list" "$config_file"
-                            export GWT_COPY_DIRS="$new_list"
-                            echo "Removed '$rem_dir'"
-                        fi
+                            new_list=$(echo "$new_list" | tr ',' '\n' | grep -v "^${escaped_dir}$" | tr '\n' ',' | sed 's/,$//')
+                            _gwt_ui_log success "Removed '$rem_dir'"
+                        done <<< "$selected"
+                        _gwt_config_write_file "GWT_COPY_DIRS" "$new_list" "$config_file"
+                        export GWT_COPY_DIRS="$new_list"
                     fi
                 fi
                 ;;
@@ -848,17 +1166,17 @@ _gwt_config_copy_dirs() {
                 if [[ -n "$current" ]]; then
                     print -P "%BConfigured directories:%b"
                     echo "$current" | tr ',' '\n' | while read -r dir; do
-                        print -P "  %F{green}●%f $dir"
+                        print -P "  %F{$GWT_COLOR_SUCCESS}●%f $dir"
                     done
                 else
-                    print -P "  %F{240}No directories configured%f"
+                    print -P "  %F{$GWT_COLOR_DIM}No directories configured%f"
                 fi
                 ;;
             "Back"|"")
                 return 0
                 ;;
             *)
-                print -P "  %F{red}Invalid choice%f"
+                _gwt_ui_log error "Invalid choice"
                 ;;
         esac
     done
@@ -868,19 +1186,19 @@ _gwt_config_copy_dirs() {
 _gwt_config_main_branch() {
     local config_file="$1"
     local current=$(_gwt_config_read_file "GWT_MAIN_BRANCH" "$config_file")
-    print -P "  %F{240}Current main branch: ${current:-main (default)}%f"
-    print -Pn "  %F{cyan}❯%f New main branch (empty to reset to default): "
-    read new_branch
-    if [[ -z "$new_branch" ]]; then
+    print -P "  %F{$GWT_COLOR_DIM}Current main branch: ${current:-main (default)}%f"
+    local new_branch
+    new_branch=$(_gwt_ui_input "New main branch (empty to reset to default)" "main")
+    if [[ -z "$new_branch" || "$new_branch" == "main" ]]; then
         _gwt_config_write_file "GWT_MAIN_BRANCH" "" "$config_file"
         unset GWT_MAIN_BRANCH
-        print -P "  %F{green}✓%f Reset to default (main)"
+        _gwt_ui_log success "Reset to default (main)"
     elif [[ "$new_branch" =~ [[:space:]] || "$new_branch" =~ [\~\^:\\\*\?\[] ]]; then
-        print -P "  %F{red}Invalid branch name%f - no spaces or special characters allowed"
+        _gwt_ui_log error "Invalid branch name - no spaces or special characters allowed"
     else
         _gwt_config_write_file "GWT_MAIN_BRANCH" "$new_branch" "$config_file"
         export GWT_MAIN_BRANCH="$new_branch"
-        print -P "  %F{green}✓%f Main branch set to '$new_branch'"
+        _gwt_ui_log success "Main branch set to '$new_branch'"
     fi
 }
 
@@ -893,43 +1211,44 @@ _gwt_config_alias() {
 
     if $has_key; then
         if [[ -n "$current" ]]; then
-            print -P "  %F{240}Current alias: $current%f"
+            print -P "  %F{$GWT_COLOR_DIM}Current alias: $current%f"
         else
-            print -P "  %F{240}Alias: disabled%f"
+            print -P "  %F{$GWT_COLOR_DIM}Alias: disabled%f"
         fi
     else
-        print -P "  %F{240}Current alias: wt (default)%f"
+        print -P "  %F{$GWT_COLOR_DIM}Current alias: wt (default)%f"
     fi
 
-    echo "  1) Set custom alias"
-    echo "  2) Disable alias"
-    echo "  3) Reset to default (wt)"
-    printf "  Choice [1-3]: "
-    read sub_choice
+    local sub_choice
+    sub_choice=$(_gwt_ui_select_one "Alias action" \
+        "● Set custom alias" \
+        "● Disable alias" \
+        "● Reset to default (wt)")
+    sub_choice="${sub_choice#● }"
 
     case "$sub_choice" in
-        1)
-            print -Pn "  %F{cyan}❯%f New alias: "
-            read new_alias
+        "Set custom alias")
+            local new_alias
+            new_alias=$(_gwt_ui_input "New alias" "wt")
             if [[ -n "$new_alias" && ! "$new_alias" =~ [[:space:]] ]]; then
                 _gwt_config_write_file "GWT_ALIAS" "$new_alias" "$config_file"
                 export GWT_ALIAS="$new_alias"
-                print -P "  %F{green}✓%f Alias set to '$new_alias' (restart shell to apply)"
+                _gwt_ui_log success "Alias set to '$new_alias' (restart shell to apply)"
             else
-                print -P "  %F{red}Invalid alias%f"
+                _gwt_ui_log error "Invalid alias"
             fi
             ;;
-        2)
+        "Disable alias")
             # Write empty value explicitly (GWT_ALIAS= means "no alias")
             _gwt_config_write_file "GWT_ALIAS" "" "$config_file" --keep-empty
             export GWT_ALIAS=""
-            print -P "  %F{green}✓%f Alias disabled (restart shell to apply)"
+            _gwt_ui_log success "Alias disabled (restart shell to apply)"
             ;;
-        3)
+        "Reset to default (wt)")
             # Remove the key entirely (unset = use default "wt")
             _gwt_config_write_file "GWT_ALIAS" "" "$config_file"
             unset GWT_ALIAS
-            print -P "  %F{green}✓%f Reset to default (wt, restart shell to apply)"
+            _gwt_ui_log success "Reset to default (wt, restart shell to apply)"
             ;;
     esac
 }
@@ -941,40 +1260,96 @@ _gwt_config_nofzf() {
     if [[ -n "$current" ]]; then
         _gwt_config_write_file "GWT_NO_FZF" "" "$config_file"
         unset GWT_NO_FZF
-        print -P "  %F{green}✓%f fzf menus enabled"
+        _gwt_ui_log success "fzf menus enabled"
     else
         _gwt_config_write_file "GWT_NO_FZF" "1" "$config_file"
         export GWT_NO_FZF=1
-        print -P "  %F{green}✓%f fzf menus disabled"
+        _gwt_ui_log success "fzf menus disabled"
     fi
+}
+
+# Config toggle for gum
+_gwt_config_nogum() {
+    local config_file="$1"
+    local current=$(_gwt_config_read_file "GWT_NO_GUM" "$config_file")
+    if [[ -n "$current" ]]; then
+        _gwt_config_write_file "GWT_NO_GUM" "" "$config_file"
+        unset GWT_NO_GUM
+        _gwt_ui_log success "gum menus enabled"
+    else
+        _gwt_config_write_file "GWT_NO_GUM" "1" "$config_file"
+        export GWT_NO_GUM=1
+        _gwt_ui_log success "gum menus disabled"
+    fi
+}
+
+# Config sub-menu for UI backend selection
+_gwt_config_uibackend() {
+    local config_file="$1"
+    local current=$(_gwt_config_read_file "GWT_UI_BACKEND" "$config_file")
+    print -P "  %F{$GWT_COLOR_DIM}Current: ${current:-auto}%f"
+    print -P "  %F{$GWT_COLOR_DIM}auto = gum > fzf > plain (detected at runtime)%f"
+
+    local choice
+    choice=$(_gwt_ui_select_one "Pick UI backend" \
+        "● auto (detect best available)" \
+        "● gum (richest UI, requires gum binary)" \
+        "● fzf (fuzzy search, requires fzf binary)" \
+        "● plain (numbered menus, no deps)")
+    choice="${choice#● }"
+
+    case "$choice" in
+        auto*)
+            _gwt_config_write_file "GWT_UI_BACKEND" "" "$config_file"
+            unset GWT_UI_BACKEND
+            _gwt_ui_log success "UI backend set to auto"
+            ;;
+        gum*)
+            _gwt_config_write_file "GWT_UI_BACKEND" "gum" "$config_file"
+            export GWT_UI_BACKEND="gum"
+            _gwt_ui_log success "UI backend set to gum"
+            ;;
+        fzf*)
+            _gwt_config_write_file "GWT_UI_BACKEND" "fzf" "$config_file"
+            export GWT_UI_BACKEND="fzf"
+            _gwt_ui_log success "UI backend set to fzf"
+            ;;
+        plain*)
+            _gwt_config_write_file "GWT_UI_BACKEND" "plain" "$config_file"
+            export GWT_UI_BACKEND="plain"
+            _gwt_ui_log success "UI backend set to plain"
+            ;;
+    esac
 }
 
 # Config sub-menu for post-create command
 _gwt_config_postcmd() {
     local config_file="$1"
     local current=$(_gwt_config_read_file "GWT_POST_CREATE_CMD" "$config_file")
-    print -P "  %F{240}Current: ${current:-(none)}%f"
-    print -P "  %F{240}Note: .gwt/post-create.sh script takes precedence over this setting%f"
+    print -P "  %F{$GWT_COLOR_DIM}Current: ${current:-(none)}%f"
+    print -P "  %F{$GWT_COLOR_DIM}Note: .gwt/post-create.sh script takes precedence over this setting%f"
 
-    echo "  1) Set command"
-    echo "  2) Clear command"
-    printf "  Choice [1-2]: "
-    read sub_choice
+    local sub_choice
+    sub_choice=$(_gwt_ui_select_one "Post-create command" \
+        "● Set command" \
+        "● Clear command")
+    sub_choice="${sub_choice#● }"
 
     case "$sub_choice" in
-        1)
-            print -Pn "  %F{cyan}❯%f Post-create command: "
-            read new_cmd
+        "Set command")
+            local new_cmd
+            # _gwt_ui_write is multi-line under gum, single-line under fzf/plain
+            new_cmd=$(_gwt_ui_write "Post-create command" "npm install")
             if [[ -n "$new_cmd" ]]; then
                 _gwt_config_write_file "GWT_POST_CREATE_CMD" "$new_cmd" "$config_file"
                 export GWT_POST_CREATE_CMD="$new_cmd"
-                print -P "  %F{green}✓%f Post-create command set"
+                _gwt_ui_log success "Post-create command set"
             fi
             ;;
-        2)
+        "Clear command")
             _gwt_config_write_file "GWT_POST_CREATE_CMD" "" "$config_file"
             unset GWT_POST_CREATE_CMD
-            print -P "  %F{green}✓%f Post-create command cleared"
+            _gwt_ui_log success "Post-create command cleared"
             ;;
     esac
 }
@@ -1011,12 +1386,6 @@ _gwt_config() {
     [[ ! -f "$global_config" ]] && touch "$global_config"
 
     while true; do
-        # Re-evaluate fzf each iteration (may have been toggled)
-        local use_fzf=false
-        if [[ -z "$(_gwt_config_resolve "GWT_NO_FZF" "")" ]] && command -v fzf &> /dev/null && [[ -t 0 ]]; then
-            use_fzf=true
-        fi
-
         # Determine active config file based on scope
         if [[ "$scope" == "local" ]]; then
             local repo_root
@@ -1026,7 +1395,7 @@ _gwt_config() {
                 mkdir -p "$repo_root/.gwt"
                 [[ ! -f "$config_file" ]] && touch "$config_file"
             else
-                print -P "  %F{red}Not in a git repo — cannot use local scope%f"
+                _gwt_ui_log error "Not in a git repo — cannot use local scope"
                 scope="global"
                 config_file="$global_config"
             fi
@@ -1041,53 +1410,23 @@ _gwt_config() {
         local cur_nofzf=$(_gwt_config_read_file "GWT_NO_FZF" "$config_file")
         local cur_postcmd=$(_gwt_config_read_file "GWT_POST_CREATE_CMD" "$config_file")
 
-        local choice=""
+        # NOTE: Order is preserved 1:1 with v1.x — tests rely on these positions.
+        # New env vars GWT_NO_GUM / GWT_UI_BACKEND are settable via env or by
+        # editing ~/.config/gwt/config directly; they aren't on the menu yet.
+        local -a actions=(
+            "● Copy directories    ${cur_dirs:+(${cur_dirs})}${cur_dirs:-  (none)}"
+            "● Main branch         ${cur_main:+(${cur_main})}${cur_main:-  (main)}"
+            "● Command alias       ${cur_alias:+(${cur_alias})}${cur_alias:-  (wt)}"
+            "● Disable fzf menus   ${cur_nofzf:+(on)}${cur_nofzf:-  (off)}"
+            "● Post-create command ${cur_postcmd:+(${cur_postcmd})}${cur_postcmd:-  (none)}"
+            "● Settings scope      → $scope"
+            "● Done"
+        )
 
-        if $use_fzf; then
-            local -a actions=(
-                "● Copy directories    ${cur_dirs:+(${cur_dirs})}"
-                "● Main branch         ${cur_main:+(${cur_main})}${cur_main:+}${cur_main:-  (main)}"
-                "● Command alias       ${cur_alias:+(${cur_alias})}${cur_alias:+}${cur_alias:-  (wt)}"
-                "● Disable fzf menus   ${cur_nofzf:+(on)}${cur_nofzf:+}${cur_nofzf:-  (off)}"
-                "● Post-create command ${cur_postcmd:+(${cur_postcmd})}${cur_postcmd:+}${cur_postcmd:-  (none)}"
-                "● Settings scope      → $scope"
-                "● Done"
-            )
-            choice=$(printf '%s\n' "${actions[@]}" | fzf \
-                --header="GWT Config [$scope]" \
-                --prompt="❯ " \
-                --pointer="▶" \
-                --color="prompt:cyan,pointer:green,header:dim" \
-                --reverse \
-                --height=40% \
-                --no-multi)
-            choice="${choice#● }"
-            choice="${choice%%  *}"
-        else
-            echo ""
-            echo "=== GWT Config [$scope] ==="
-            echo ""
-            echo "1) Copy directories    ${cur_dirs:-(none)}"
-            echo "2) Main branch         ${cur_main:-main}"
-            echo "3) Command alias       ${cur_alias:-wt}"
-            echo "4) Disable fzf menus   ${cur_nofzf:+on}${cur_nofzf:-off}"
-            echo "5) Post-create command ${cur_postcmd:-(none)}"
-            echo "6) Settings scope      → $scope"
-            echo "7) Done"
-            echo ""
-            printf "Choice [1-7]: "
-            read choice
-
-            case "$choice" in
-                1) choice="Copy directories" ;;
-                2) choice="Main branch" ;;
-                3) choice="Command alias" ;;
-                4) choice="Disable fzf" ;;
-                5) choice="Post-create" ;;
-                6) choice="Settings scope" ;;
-                7|"") choice="Done" ;;
-            esac
-        fi
+        local choice
+        choice=$(_gwt_ui_select_one "GWT Config [$scope]" "${actions[@]}")
+        choice="${choice#● }"
+        choice="${choice%%  *}"
 
         case "$choice" in
             Copy*)
@@ -1108,18 +1447,18 @@ _gwt_config() {
             Settings*)
                 if [[ "$scope" == "global" ]]; then
                     scope="local"
-                    print -P "  %F{green}✓%f Scope set to local (.gwt/config)"
+                    _gwt_ui_log success "Scope set to local (.gwt/config)"
                 else
                     scope="global"
-                    print -P "  %F{green}✓%f Scope set to global (~/.config/gwt/config)"
+                    _gwt_ui_log success "Scope set to global (~/.config/gwt/config)"
                 fi
                 ;;
             "Done"|"")
-                print -P "  %F{green}✓%f Configuration saved"
+                _gwt_ui_log success "Configuration saved"
                 return 0
                 ;;
             *)
-                print -P "  %F{red}Invalid choice%f"
+                _gwt_ui_log error "Invalid choice"
                 ;;
         esac
     done
@@ -1183,7 +1522,7 @@ _gwt_run_post_create_hook() {
 _gwt_prune() {
     # Must be in a git repo
     if ! git rev-parse --git-dir > /dev/null 2>&1; then
-        print -P "%F{red}Error:%f Not in a git repository"
+        _gwt_ui_log error "Not in a git repository"
         return 1
     fi
 
@@ -1212,66 +1551,28 @@ _gwt_prune() {
 
     if [[ ${#worktree_paths[@]} -eq 0 ]]; then
         echo ""
-        print -P "  %F{240}No worktrees to prune%f"
+        print -P "  %F{$GWT_COLOR_DIM}No worktrees to prune%f"
         echo ""
         return 0
     fi
 
-    # Use fzf if available and stdin is a TTY, otherwise fallback
+    # Pick worktrees via the unified UI (gum filter > fzf > numbered)
     local -a to_prune=()
-    if [[ -z "$(_gwt_config_resolve "GWT_NO_FZF" "")" ]] && command -v fzf &> /dev/null && [[ -t 0 ]]; then
-        # fzf multi-select mode
-        local selected
-        selected=$(printf '%s\n' "${worktree_display[@]}" | fzf --multi \
-            --header="Select worktrees to prune (TAB to select, ENTER to confirm)" \
-            --prompt="❯ " \
-            --pointer="▶" \
-            --marker="✓" \
-            --color="prompt:cyan,pointer:green,marker:green,header:dim" \
-            --reverse \
-            --height=50%)
+    local selected
+    selected=$(_gwt_ui_select_many \
+        "Select worktrees to prune (TAB to select, ENTER to confirm)" \
+        "${worktree_display[@]}")
 
-        [[ -z "$selected" ]] && return 0
+    [[ -z "$selected" ]] && return 0
 
-        # Extract paths from selected lines
-        local extracted_path
-        while IFS= read -r line; do
-            # Extract path (between "● " or "○ " and " (")
-            extracted_path="${line#[●○] }"
-            extracted_path="${extracted_path%% \(*}"
-            to_prune+=("$extracted_path")
-        done <<< "$selected"
-    else
-        # Fallback to numbered selection
-        echo ""
-        print -P "%BSelect worktrees to prune:%b"
-        echo ""
-        local i=1
-        for display in "${worktree_display[@]}"; do
-            if [[ "$display" == ●* ]]; then
-                print -P "  %F{green}${display}%f" | sed "s/●/$i)/"
-            else
-                print -P "  %F{red}${display}%f" | sed "s/○/$i)/"
-            fi
-            ((i++))
-        done
-        echo ""
-        print -Pn "  %F{cyan}❯%f Enter numbers (1 3), 'all', or 'q': "
-        read selection
-
-        [[ "$selection" == "q" ]] && return 0
-
-        if [[ "$selection" == "all" ]]; then
-            to_prune=("${worktree_paths[@]}")
-        else
-            local num
-            for num in ${=selection}; do
-                if [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 1 && num <= ${#worktree_paths[@]} )); then
-                    to_prune+=("${worktree_paths[$num]}")
-                fi
-            done
-        fi
-    fi
+    # Extract paths from selected lines (between "● " or "○ " and " (")
+    local line extracted_path
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        extracted_path="${line#[●○] }"
+        extracted_path="${extracted_path%% \(*}"
+        to_prune+=("$extracted_path")
+    done <<< "$selected"
 
     [[ ${#to_prune[@]} -eq 0 ]] && return 0
 
@@ -1290,44 +1591,46 @@ _gwt_prune() {
 
     # Show summary of what will be deleted
     echo ""
-    print -P "%B━━━ Summary ━━━%b"
-    print -P "%F{red}The following will be permanently deleted:%f"
+    _gwt_ui_header "━━━ Summary ━━━"
+    print -P "%F{$GWT_COLOR_DANGER}The following will be permanently deleted:%f"
     echo ""
     for prune_path in "${to_prune[@]}"; do
         if [[ -d "$prune_path" ]]; then
             local wt_branch=$(cd "$prune_path" 2>/dev/null && git branch --show-current 2>/dev/null || echo "detached")
-            print -P "  %F{green}●%f $prune_path %F{240}($wt_branch)%f"
+            print -P "  %F{$GWT_COLOR_SUCCESS}●%f $prune_path %F{$GWT_COLOR_DIM}($wt_branch)%f"
         else
-            print -P "  %F{red}○%f $prune_path %F{240}(missing)%f"
+            print -P "  %F{$GWT_COLOR_DANGER}○%f $prune_path %F{$GWT_COLOR_DIM}(missing)%f"
         fi
     done
 
     # Warn about uncommitted changes
     if [[ ${#has_changes[@]} -gt 0 ]]; then
         echo ""
-        print -P "%F{yellow}⚠ WARNING: Uncommitted changes in:%f"
+        print -P "%F{$GWT_COLOR_WARN}⚠ WARNING: Uncommitted changes in:%f"
         for prune_path in "${has_changes[@]}"; do
-            print -P "  %F{yellow}•%f $prune_path"
+            print -P "  %F{$GWT_COLOR_WARN}•%f $prune_path"
         done
     fi
 
-    # Single confirmation
+    # Double confirmation (preserves current safety behavior)
     echo ""
     print -P "  Total: %B${#to_prune[@]}%b worktree(s) to delete"
     echo ""
-    print -Pn "  %F{cyan}❯%f Confirm deletion? (y/N): "
-    local confirm1
-    read confirm1
-    [[ "$confirm1" != "y" && "$confirm1" != "Y" ]] && { print -P "  %F{240}Cancelled%f"; return 0; }
+    if ! _gwt_ui_confirm "Confirm deletion?"; then
+        print -P "  %F{$GWT_COLOR_DIM}Cancelled%f"
+        return 0
+    fi
 
-    print -Pn "  %F{cyan}❯%f Type 'DELETE' to confirm: "
     local confirm2
-    read confirm2
-    [[ "$confirm2" != "DELETE" ]] && { print -P "  %F{240}Cancelled%f"; return 0; }
+    confirm2=$(_gwt_ui_input "Type DELETE to confirm" "DELETE")
+    if [[ "$confirm2" != "DELETE" ]]; then
+        print -P "  %F{$GWT_COLOR_DIM}Cancelled%f"
+        return 0
+    fi
 
     # Delete all selected worktrees
     echo ""
-    print -P "%BDeleting...%b"
+    _gwt_ui_header "Deleting..."
     for prune_path in "${to_prune[@]}"; do
         cd "$repo_root"
         git worktree remove --force "$prune_path" 2>/dev/null || git worktree remove "$prune_path" 2>/dev/null
@@ -1336,19 +1639,19 @@ _gwt_prune() {
         if [[ -d "$prune_path" ]]; then
             rm -rf "$prune_path"
         fi
-        print -P "  %F{green}✓%f $prune_path"
+        _gwt_ui_log success "$prune_path"
     done
 
     # Clean up stale worktree references
     cd "$repo_root"
     git worktree prune
     echo ""
-    print -P "%F{green}✓%f Done! Removed ${#to_prune[@]} worktree(s)"
+    _gwt_ui_log success "Done! Removed ${#to_prune[@]} worktree(s)"
 }
 
 # Remove conflicting alias (e.g. OMZ git plugin defines gwt='git worktree')
 if (( ${+aliases[gwt]} )); then
-    print -P "%F{yellow}gwt:%f removed conflicting alias gwt='${aliases[gwt]}'"
+    print -P "%F{$GWT_COLOR_WARN}gwt:%f removed conflicting alias gwt='${aliases[gwt]}'"
     unalias gwt
 fi
 
@@ -1376,7 +1679,8 @@ Stacking Options:
   -i, --info                Show stack info (base branch, dependents)
 
 Worktree Management:
-  --list                    List worktrees with hierarchy indicators
+  --list                    Interactive worktree picker (↑↓/Ctrl+J,K, ENTER to jump)
+  --list --plain            Print flat hierarchical list (no picker)
   --prune                   Interactive pruning (dependency-aware)
   --config                  Configure default directories to copy
   --copy-config-dirs <dir>  Copy directory to worktree (repeatable)
@@ -1393,7 +1697,10 @@ Environment Variables:
   GWT_MAIN_BRANCH           Default base branch for new worktrees (default: main)
   GWT_COPY_DIRS             Comma-separated list of directories to always copy
   GWT_ALIAS                 Alias for gwt command (default: "wt", set "" to disable)
-  GWT_NO_FZF                Set to 1 to disable fzf menus (use numbered fallback)
+  GWT_UI_BACKEND            Force UI backend: gum | fzf | plain (default: auto)
+  GWT_NO_GUM                Set to 1 to skip gum even if installed
+  GWT_NO_FZF                Set to 1 to skip fzf even if installed
+  GWT_NO_PAGER              Set to 1 to disable auto-pagination of long output
   GWT_POST_CREATE_CMD       Command to run after worktree creation (e.g. "npm install")
 
 Config Files (local overrides global, env vars override both):
@@ -1437,58 +1744,183 @@ HELP
             return $?
             ;;
         --list)
+            shift
+            # Flag parsing: --plain (or --no-interactive) forces the legacy printer
+            local list_plain=false
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --plain|--no-interactive) list_plain=true; shift ;;
+                    --help|-h)
+                        cat <<'LISTHELP'
+gwt --list - List worktrees (or pick one to jump to)
+
+Usage: gwt --list [--plain]
+
+When stdout is a TTY (and there's at least one linked worktree), --list shows
+an interactive picker. Use arrow keys or Ctrl+J/Ctrl+K (vim-style) to navigate,
+type to fuzzy-filter, ENTER to cd into the selected worktree, ESC to cancel.
+
+  --plain                 Disable the picker. Print the flat hierarchical list
+                          (same as piping the output, useful for scripts).
+  --no-interactive        Alias for --plain.
+LISTHELP
+                        return 0
+                        ;;
+                    *)
+                        _gwt_ui_log error "Unknown --list option: $1"
+                        return 1
+                        ;;
+                esac
+            done
+
             if ! git rev-parse --git-dir > /dev/null 2>&1; then
-                print -P "%F{red}Error:%f Not in a git repository"
+                _gwt_ui_log error "Not in a git repository"
                 return 1
             fi
             local repo_root=$(git rev-parse --show-toplevel)
+            local current_path=$(pwd)
             local found=false
             local wt_path wt_branch wt_base
             local -a worktrees=()
             local -A wt_bases=()
             local -A wt_branches=()
 
-            echo ""
-
-            # First pass: collect all worktrees and their metadata
+            # Collect all worktrees + metadata (include main worktree for the picker)
             while IFS= read -r line; do
                 if [[ "$line" == worktree* ]]; then
                     wt_path="${line#worktree }"
-                    if [[ "$wt_path" != "$repo_root" ]]; then
-                        worktrees+=("$wt_path")
-                        if [[ -d "$wt_path" ]]; then
-                            wt_branch=$(cd "$wt_path" 2>/dev/null && git branch --show-current 2>/dev/null || echo "detached")
-                            wt_base=$(cd "$wt_path" 2>/dev/null && _gwt_metadata_get "baseBranch" 2>/dev/null)
-                            wt_branches[$wt_path]="$wt_branch"
-                            wt_bases[$wt_path]="$wt_base"
-                        fi
+                    worktrees+=("$wt_path")
+                    if [[ -d "$wt_path" ]]; then
+                        wt_branch=$(cd "$wt_path" 2>/dev/null && git branch --show-current 2>/dev/null || echo "detached")
+                        wt_base=$(cd "$wt_path" 2>/dev/null && _gwt_metadata_get "baseBranch" 2>/dev/null)
+                        wt_branches[$wt_path]="$wt_branch"
+                        wt_bases[$wt_path]="$wt_base"
                     fi
                 fi
             done < <(git worktree list --porcelain)
 
-            # Second pass: display with hierarchy
-            for wt_path in "${worktrees[@]}"; do
-                found=true
-                wt_branch="${wt_branches[$wt_path]}"
-                wt_base="${wt_bases[$wt_path]}"
+            # Decide whether to run the picker:
+            # - --plain flag → always plain
+            # - non-TTY stdout → always plain (preserves script-friendly piping)
+            # - 0 linked worktrees → plain (nothing to pick from)
+            local interactive=true
+            if $list_plain; then
+                interactive=false
+            elif [[ ! -t 1 ]]; then
+                interactive=false
+            elif [[ ${#worktrees[@]} -le 1 ]]; then
+                interactive=false
+            fi
 
-                if [[ -d "$wt_path" ]]; then
-                    if [[ -n "$wt_base" ]]; then
-                        # This is a stacked worktree - show with tree indicator
-                        print -P "  %F{blue}└─%f %F{green}●%f $wt_path %F{240}($wt_branch)%f"
+            if ! $interactive; then
+                # Legacy printer: skip the main worktree, show hierarchy indicators
+                echo ""
+                for wt_path in "${worktrees[@]}"; do
+                    [[ "$wt_path" == "$repo_root" ]] && continue
+                    found=true
+                    wt_branch="${wt_branches[$wt_path]}"
+                    wt_base="${wt_bases[$wt_path]}"
+
+                    if [[ -d "$wt_path" ]]; then
+                        if [[ -n "$wt_base" ]]; then
+                            print -P "  %F{$GWT_COLOR_INFO}└─%f %F{$GWT_COLOR_SUCCESS}●%f $wt_path %F{$GWT_COLOR_DIM}($wt_branch)%f"
+                        else
+                            print -P "  %F{$GWT_COLOR_SUCCESS}●%f $wt_path %F{$GWT_COLOR_DIM}($wt_branch)%f"
+                        fi
                     else
-                        # Regular worktree - show normally
-                        print -P "  %F{green}●%f $wt_path %F{240}($wt_branch)%f"
+                        print -P "  %F{$GWT_COLOR_DANGER}○%f $wt_path %F{$GWT_COLOR_DIM}(missing)%f"
                     fi
-                else
-                    print -P "  %F{red}○%f $wt_path %F{240}(missing)%f"
+                done
+                if ! $found; then
+                    print -P "  %F{$GWT_COLOR_DIM}No worktrees found%f"
                 fi
+                echo ""
+                return 0
+            fi
+
+            # Interactive picker.
+            # Build enriched, tab-delimited rows for the picker:
+            #   {glyph}{maybe-tree-prefix}{path}{TAB}{branch-or-status}{TAB}{path}
+            # The trailing path field is the parse target after selection.
+            local -a picker_rows=()
+            local -a picker_paths=()
+
+            # Repo width hint for nice alignment under gum's monospace
+            local max_branch_len=0
+            for wt_path in "${worktrees[@]}"; do
+                wt_branch="${wt_branches[$wt_path]:-detached}"
+                (( ${#wt_branch} > max_branch_len )) && max_branch_len=${#wt_branch}
+            done
+            (( max_branch_len > 40 )) && max_branch_len=40
+
+            for wt_path in "${worktrees[@]}"; do
+                wt_branch="${wt_branches[$wt_path]:-}"
+                wt_base="${wt_bases[$wt_path]:-}"
+                local glyph="●"
+                local prefix=""
+                local marker=""
+                local status="$wt_branch"
+
+                # Indicate stacked worktrees
+                [[ -n "$wt_base" ]] && prefix="└─ "
+                # Indicate the main worktree
+                [[ "$wt_path" == "$repo_root" ]] && status="${wt_branch} ★ main"
+                # Indicate the current worktree
+                [[ "$wt_path" == "$current_path" ]] && marker=" ← you are here"
+
+                if [[ ! -d "$wt_path" ]]; then
+                    glyph="○"
+                    status="(missing)"
+                fi
+
+                # Pad branch column for readability under monospaced renderers.
+                local padded_branch
+                padded_branch=$(printf "%-${max_branch_len}s" "$status")
+
+                # Display line + trailing path field (TAB-delimited for post-select parsing)
+                picker_rows+=("${glyph} ${prefix}${padded_branch}  ${wt_path}${marker}	${wt_path}")
+                picker_paths+=("$wt_path")
             done
 
-            if [[ "$found" == false ]]; then
-                print -P "  %F{240}No worktrees found%f"
+            local selection
+            selection=$(_gwt_ui_select_one \
+                "Pick a worktree to jump to · ↑↓ or Ctrl+J/Ctrl+K · ENTER to jump · ESC to cancel" \
+                "${picker_rows[@]}")
+
+            # ESC or empty → cancel cleanly
+            if [[ -z "$selection" ]]; then
+                return 0
             fi
-            echo ""
+
+            # Parse trailing path field (everything after last TAB)
+            local picked_path="${selection##*	}"
+
+            # Validate the selection corresponds to an existing worktree
+            local valid=false
+            for wt_path in "${picker_paths[@]}"; do
+                [[ "$wt_path" == "$picked_path" ]] && valid=true && break
+            done
+            if ! $valid; then
+                _gwt_ui_log error "Could not parse selection — try again"
+                return 1
+            fi
+
+            # Refuse to jump to a missing worktree
+            if [[ ! -d "$picked_path" ]]; then
+                _gwt_ui_log error "Worktree no longer exists: $picked_path"
+                _gwt_ui_log info "Run 'gwt --prune' to clean up stale entries"
+                return 1
+            fi
+
+            # Already there?
+            if [[ "$picked_path" == "$current_path" ]]; then
+                _gwt_ui_log info "Already in this worktree"
+                return 0
+            fi
+
+            cd "$picked_path"
+            local picked_branch=$(git branch --show-current 2>/dev/null)
+            _gwt_ui_log success "Jumped to ${picked_branch:-detached} at $picked_path"
             return 0
             ;;
         --list-copy-dirs)
@@ -1671,12 +2103,12 @@ HELP
         return 0
     fi
 
-    echo "Creating worktree..."
-    echo "  Branch: $branch_name"
-    echo "  Path: $worktree_path"
+    _gwt_ui_header "Creating worktree..."
+    print -P "  %F{$GWT_COLOR_DIM}Branch:%f $branch_name"
+    print -P "  %F{$GWT_COLOR_DIM}Path:%f   $worktree_path"
 
-    # Fetch latest if origin exists
-    git fetch origin 2>/dev/null || true
+    # Fetch latest if origin exists (silently — networks fail, that's OK)
+    _gwt_ui_spin "Fetching origin..." -- sh -c 'git fetch origin 2>/dev/null || true'
 
     # Create worktree - handle existing vs new branch
     local worktree_created=false
@@ -1747,7 +2179,7 @@ HELP
         fi
 
         echo ""
-        echo "Worktree created successfully!"
+        _gwt_ui_log success "Worktree created successfully!"
         cd "$worktree_path"
         _gwt_run_post_create_hook "$repo_root"
         pwd
