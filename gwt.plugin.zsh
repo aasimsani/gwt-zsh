@@ -32,7 +32,7 @@
 #   gwt --copy-config-dirs serena feature/branch  -> copies ./serena to worktree
 #   gwt --config                                  -> interactive config menu
 
-GWT_VERSION="1.6.0"
+GWT_VERSION="1.7.0"
 GWT_REPO="aasimsani/gwt-zsh"
 
 # Store install directory when sourced (works with all plugin managers)
@@ -169,6 +169,11 @@ _gwt_ui_select_one() {
             _gwt_ui_hint_gum_missing
             ;;
     esac
+    # Always return 0 — emptiness on stdout is the cancel signal. Returning
+    # a non-zero exit (e.g. when gum filter exits on ESC) would surface as
+    # a "✗" in the user's prompt and confuse them; the abstraction's contract
+    # is "stdout = selection, empty = cancel, exit code = always 0".
+    return 0
 }
 
 # Multi-select. Prints newline-separated selections to stdout.
@@ -214,8 +219,9 @@ _gwt_ui_select_many() {
             print -Pn "%F{$GWT_COLOR_PRIMARY}❯%f " >&2
             local input
             read input
-            [[ "$input" == "q" ]] && return 0
-            if [[ "$input" == "all" ]]; then
+            if [[ "$input" == "q" ]]; then
+                :
+            elif [[ "$input" == "all" ]]; then
                 printf '%s\n' "${items[@]}"
             else
                 local num
@@ -228,6 +234,8 @@ _gwt_ui_select_many() {
             _gwt_ui_hint_gum_missing
             ;;
     esac
+    # Always return 0 — see _gwt_ui_select_one for rationale.
+    return 0
 }
 
 # Yes/no. Returns 0 (yes) or 1 (no/cancel).
@@ -1568,12 +1576,14 @@ _gwt_prune() {
 
     # Pick worktrees via the unified UI (gum filter > fzf > numbered)
     local -a to_prune=()
-    local selected
-    selected=$(_gwt_ui_select_many \
+    local selected=$(_gwt_ui_select_many \
         "Select worktrees to prune (TAB to select, ENTER to confirm)" \
         "${worktree_display[@]}")
 
-    [[ -z "$selected" ]] && return 0
+    if [[ -z "$selected" ]]; then
+        print -P "  %F{$GWT_COLOR_DIM}Cancelled — nothing pruned%f"
+        return 0
+    fi
 
     # Extract paths from selected lines (between "● " or "○ " and " (")
     # and validate against the known worktree list. Anything that does not
@@ -1919,8 +1929,10 @@ LISTHELP
             esac
             local selection=$(_gwt_ui_select_one "$picker_header" "${picker_rows[@]}")
 
-            # ESC, empty, or "q" in plain mode → cancel cleanly
+            # ESC, empty, or "q" in plain mode → cancel cleanly with a hint so
+            # the user gets some confirmation that the picker actually ran.
             if [[ -z "$selection" || "$selection" == "q" || "$selection" == "Q" ]]; then
+                print -P "  %F{$GWT_COLOR_DIM}Cancelled — no worktree picked%f"
                 return 0
             fi
 
