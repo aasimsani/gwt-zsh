@@ -1096,8 +1096,9 @@ _gwt_config_copy_dirs() {
         local header="Copy Directories"
         [[ -n "$current" ]] && header="Copy Directories ─ Current: $current"
 
-        local choice
-        choice=$(_gwt_ui_select_one "$header" \
+        # NB: must combine `local` with the assignment — bare `local var`
+        # inside a loop body re-prints the previous iteration's value.
+        local choice=$(_gwt_ui_select_one "$header" \
             "● Add directory" \
             "● Remove directory" \
             "● List directories" \
@@ -1109,11 +1110,9 @@ _gwt_config_copy_dirs() {
                 local new_dir=""
                 # Under gum, use the tree-style directory picker rooted at repo root (or cwd)
                 if [[ "$(_gwt_ui_backend)" == gum ]] && command -v gum &>/dev/null; then
-                    local repo_root
-                    repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
+                    local repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
                     [[ -z "$repo_root" ]] && repo_root="$(pwd)"
-                    local picked
-                    picked=$(gum file --directory "$repo_root" \
+                    local picked=$(gum file --directory "$repo_root" \
                         --header="Select directory to copy to new worktrees (ESC to type a path instead)" 2>/dev/null)
                     if [[ -n "$picked" ]]; then
                         # Convert to repo-relative if inside repo
@@ -1401,8 +1400,7 @@ _gwt_config() {
     while true; do
         # Determine active config file based on scope
         if [[ "$scope" == "local" ]]; then
-            local repo_root
-            repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
+            local repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
             if [[ -n "$repo_root" ]]; then
                 config_file="$repo_root/.gwt/config"
                 mkdir -p "$repo_root/.gwt"
@@ -1436,8 +1434,7 @@ _gwt_config() {
             "● Done"
         )
 
-        local choice
-        choice=$(_gwt_ui_select_one "GWT Config [$scope]" "${actions[@]}")
+        local choice=$(_gwt_ui_select_one "GWT Config [$scope]" "${actions[@]}")
         choice="${choice#● }"
         choice="${choice%%  *}"
 
@@ -1903,21 +1900,27 @@ LISTHELP
                 fi
 
                 # Pad branch column for readability under monospaced renderers.
-                local padded_branch
-                padded_branch=$(printf "%-${max_branch_len}s" "$wt_label")
+                # NB: must combine `local` with the assignment — a bare
+                # `local var` on a re-entered scope (loop body) makes zsh
+                # *print* the existing value (like `typeset -p` without name).
+                local padded_branch=$(printf "%-${max_branch_len}s" "$wt_label")
 
                 # Display line + trailing path field (TAB-delimited for post-select parsing)
                 picker_rows+=("${glyph} ${prefix}${padded_branch}  ${wt_path}${marker}	${wt_path}")
                 picker_paths+=("$wt_path")
             done
 
-            local selection
-            selection=$(_gwt_ui_select_one \
-                "Pick a worktree to jump to · ↑↓ or Ctrl+J/Ctrl+K · ENTER to jump · ESC to cancel" \
-                "${picker_rows[@]}")
+            # Pick a backend-aware header so plain mode doesn't advertise
+            # arrow keys it can't honor.
+            local picker_header
+            case "$(_gwt_ui_backend)" in
+                gum|fzf) picker_header="Pick a worktree to jump to · ↑↓ or Ctrl+J/Ctrl+K · type to filter · ENTER to jump · ESC to cancel" ;;
+                *)       picker_header="Pick a worktree to jump to (type a number, or 'q' to cancel)" ;;
+            esac
+            local selection=$(_gwt_ui_select_one "$picker_header" "${picker_rows[@]}")
 
-            # ESC or empty → cancel cleanly
-            if [[ -z "$selection" ]]; then
+            # ESC, empty, or "q" in plain mode → cancel cleanly
+            if [[ -z "$selection" || "$selection" == "q" || "$selection" == "Q" ]]; then
                 return 0
             fi
 
