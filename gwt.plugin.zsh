@@ -32,7 +32,7 @@
 #   gwt --copy-config-dirs serena feature/branch  -> copies ./serena to worktree
 #   gwt --config                                  -> interactive config menu
 
-GWT_VERSION="1.8.1"
+GWT_VERSION="1.8.2"
 GWT_REPO="aasimsani/gwt-zsh"
 
 # Store install directory when sourced (works with all plugin managers)
@@ -128,30 +128,24 @@ _gwt_ui_select_one() {
 
     case "$backend" in
         gum)
-            # CRITICAL: Do NOT wrap `gum filter` in `$(...)` directly.
-            # Command substitution puts the pipeline in a subshell whose
-            # process group may not be the foreground, and bubbletea then
-            # can't open /dev/tty for the TUI. gum prints "could not open
-            # a new TTY: open /dev/tty: device not configured" to stderr
-            # and exits non-zero — but if stderr is suppressed, the failure
-            # is silent and the user just sees the cancel path.
+            # CRITICAL: do NOT redirect stderr. When stdout is captured (as
+            # we must to read the selection), bubbletea — gum's TUI library —
+            # falls back to writing the UI to STDERR. If we redirect stderr
+            # to /dev/null or a file, the entire picker UI is silently
+            # discarded and the user sees no picker at all (an empty result
+            # falls through to the cancel path).
             #
-            # The fix is to write gum's stdout to a temp file so gum runs
-            # in the foreground with full /dev/tty access, then read the
-            # selection from the file after gum exits. GWT_DEBUG=1 surfaces
-            # gum's stderr so future regressions are easy to spot.
-            local tmpout=$(mktemp) tmperr=$(mktemp)
+            # Also critical: do NOT wrap the whole pipeline in $(...). The
+            # subshell loses foreground-PG access and bubbletea can't open
+            # /dev/tty. Write stdout to a temp file instead, then read it.
+            local tmpout=$(mktemp)
             printf '%s\n' "${items[@]}" | gum filter \
                 --header="$header" \
                 --indicator="▶" \
-                --height=15 > "$tmpout" 2>"$tmperr"
+                --height=15 > "$tmpout"
             local rc=$? result=""
-            if [[ $rc -eq 0 ]]; then
-                result=$(<"$tmpout")
-            elif [[ -n "$GWT_DEBUG" && -s "$tmperr" ]]; then
-                print -P "%F{$GWT_COLOR_DIM}[gum rc=$rc] $(<"$tmperr")%f" >&2
-            fi
-            rm -f "$tmpout" "$tmperr"
+            [[ $rc -eq 0 ]] && result=$(<"$tmpout")
+            rm -f "$tmpout"
             [[ -n "$result" ]] && echo "$result"
             ;;
         fzf)
@@ -200,22 +194,20 @@ _gwt_ui_select_many() {
 
     case "$backend" in
         gum)
-            # See _gwt_ui_select_one for why we use temp files instead of $().
-            local tmpout=$(mktemp) tmperr=$(mktemp)
+            # See _gwt_ui_select_one for why we use a temp file (not $()) AND
+            # why stderr must remain wired to the terminal (bubbletea draws
+            # the TUI there when stdout is captured).
+            local tmpout=$(mktemp)
             printf '%s\n' "${items[@]}" | gum filter \
                 --no-limit \
                 --header="$header" \
                 --indicator="▶" \
                 --selected-prefix=" ✓ " \
                 --unselected-prefix="   " \
-                --height=15 > "$tmpout" 2>"$tmperr"
+                --height=15 > "$tmpout"
             local rc=$? result=""
-            if [[ $rc -eq 0 ]]; then
-                result=$(<"$tmpout")
-            elif [[ -n "$GWT_DEBUG" && -s "$tmperr" ]]; then
-                print -P "%F{$GWT_COLOR_DIM}[gum rc=$rc] $(<"$tmperr")%f" >&2
-            fi
-            rm -f "$tmpout" "$tmperr"
+            [[ $rc -eq 0 ]] && result=$(<"$tmpout")
+            rm -f "$tmpout"
             [[ -n "$result" ]] && echo "$result"
             ;;
         fzf)
@@ -889,30 +881,29 @@ _gwt_doctor() {
     echo ""
 
     # Live gum filter probe — exercises the real picker pipeline.
-    # NOTE: must mirror _gwt_ui_select_one exactly (temp file for output,
-    # NO --select-if-one) — earlier versions of this probe used --select-if-one
-    # which bypasses the TUI path entirely and gave false-positives.
+    #
+    # bubbletea (gum's TUI library) renders to stderr when stdout isn't a
+    # TTY, so when the probe captures BOTH streams to files, the TUI escape
+    # codes end up in the stderr file alongside any actual error messages.
+    # We can't tell "rendered + timed out" from "failed to render" just by
+    # checking stderr emptiness — we have to look for specific failure
+    # patterns. Real `_gwt_ui_select_one` only captures stdout (leaves stderr
+    # wired to the user's terminal so the UI actually renders).
     if command -v gum &>/dev/null && [[ -t 0 ]]; then
         _gwt_ui_header "gum filter probe (multi-item, real TTY path)"
         local probe_tmpout=$(mktemp) probe_tmperr=$(mktemp)
-        # Multiple items + 1s timeout — gum renders the UI on /dev/tty and
-        # auto-exits after the timeout. If the UI couldn't render at all,
-        # gum will write an error to stderr.
         printf 'probe-A\nprobe-B\nprobe-C\n' | gum filter \
             --header="probe" \
             --indicator="▶" \
             --height=15 \
             --timeout=1s > "$probe_tmpout" 2>"$probe_tmperr"
         local probe_rc=$?
-        if [[ -s "$probe_tmperr" ]]; then
-            _gwt_ui_log error "gum filter FAILED to render TUI (rc=$probe_rc)"
-            print -P "    %F{$GWT_COLOR_DIM}gum stderr:%f"
-            sed 's/^/      /' "$probe_tmperr"
-            if grep -q "could not open a new TTY" "$probe_tmperr" 2>/dev/null; then
-                echo ""
-                print -P "  %F{$GWT_COLOR_WARN}This is the \$()-subshell-vs-TTY bug. Update to a gwt%f"
-                print -P "  %F{$GWT_COLOR_WARN}version >= 1.8.1 which uses temp files for capture.%f"
-            fi
+        # Failure patterns we actually care about — anything else (including
+        # ANSI escape sequences + "timed out") means gum successfully
+        # rendered to the captured stderr.
+        if grep -qE 'could not open a new TTY|unable to run filter|unknown flag|error: ' "$probe_tmperr" 2>/dev/null; then
+            _gwt_ui_log error "gum filter renderer broken (rc=$probe_rc)"
+            grep -E 'could not|unable to|unknown flag|error: ' "$probe_tmperr" 2>/dev/null | head -3 | sed "s/^/    /"
         else
             _gwt_ui_log success "gum filter renders TUI in this shell"
         fi
